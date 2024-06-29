@@ -41,20 +41,24 @@ class Arduino():
         - digitalHigh
         - digitalLow
         - handshake
+        - flushInput
     
     Attributes (see __init__ for details):
     
         - ser
         - port
         - keys_dout
+        - keys_din
+        - input_sts
         - cmnds
         - cmndflg
         - q_tasks
+        - q_inputs
         - state
  
     """
     
-    def __init__(self, port, keys_dout=None, baudrate=115200, timeout=1):
+    def __init__(self, port, keys_dout=None, keys_din=None, baudrate=115200, timeout=1):
         
         """ 
         -------------------------------------------------------------------------------------
@@ -71,20 +75,31 @@ class Arduino():
                 Should be dictionary where each key is the name for a digital output and each
                 key is the pin ID.
 
+            keys_din:: [dict]
+                Should be dictionary where each key is the name for a digital output and each
+                key is the pin ID.
+
             baudrate:: [unsigned integer]
                 Baudrate for communicating with Arduino.
                 
             timeout:: [unsigned integer]
-                Millisecond timeout for Arduino
+                Millisecond timeout for Arduino during connection
                 
         -------------------------------------------------------------------------------------        
         Attributes:
             ser:: [serial.Serial]
                 pySerial.Serial connection for Arduino communication.
                 
-            keys_dout::
+            keys_dout:: [dict]
                 Dictionary where each key is the name for a digital output and each
                 key is the pin ID.
+
+            keys_din:: [dict
+                Dictionary where each key is the name for a digital input and each
+                key is the pin ID.
+
+            input_sts:: [dict]
+                Dictionary containing port of each input and corresponding state (0/1).
             
             cmnds:: [dict]
                 Dictionary containing values for transmitting signals to Arduino. Note that the 
@@ -96,8 +111,17 @@ class Arduino():
             
             q_tasks:: [queue.Queue]
                 Thread queue for holding commands until they are to be sent.
-            
-            state::
+
+            q_inputs:: [queue.Queue}
+                Thread queue for holding digital input events. Note that only changes in input
+                states are logged (i.e., for 10 sec continuous input, onset and offset will be sent).
+                Each item in q_inputs will contain dictionary with the following keys:
+                    'din' : input port number
+                    'state' : 0/1.  
+                    'time' : computer timestamp of event.
+
+            state:: [str]
+                Current state of Arduino [unitiated/initiated]
         
         -------------------------------------------------------------------------------------        
         Notes:
@@ -106,9 +130,12 @@ class Arduino():
 
         self.ser = serial.Serial(port = port, baudrate = baudrate, timeout = timeout)
         self.keys_dout = keys_dout
-        self.cmnds = dict(low=0, high=1, setout=2)
+        self.keys_din = keys_din
+        self.cmnds = dict(low=0, high=1, setout=2, setin=3)
         self.cmndflg = bytes([255])
+        self.input_sts = None
         self.q_tasks = queue.Queue()
+        self.q_inputs = queue.Queue()
         self.state = 'uninitiated'
 
         
@@ -162,7 +189,6 @@ class Arduino():
         
         -------------------------------------------------------------------------------------
         Notes:
-        digital inputs have yet to be implemented.
 
         """
         
@@ -171,6 +197,13 @@ class Arduino():
                 ts = time.time()
                 self.io_send((pin, self.cmnds['setout']), ts)
             print('outputs configured')
+
+        if self.keys_din is not None:
+            for name, pin in self.keys_din.items():
+                ts = time.time()
+                self.io_send((pin, self.cmnds['setin']), ts)
+            self.input_sts = {x: None for x in self.keys_din.values()}
+            print('inputs configured')
       
     
     
@@ -189,6 +222,11 @@ class Arduino():
         while True:
             cur_ts = time.time()
             hold_tasks = []
+            if self.ser.in_waiting>2:
+                input = self.ser.read_until(expected=self.cmndflg)
+                input = dict(din=input[0], state=input[1], time=time.time())
+                self.input_sts[input['din']] = input['state']
+                self.q_inputs.put(input)     
             while not self.q_tasks.empty():
                 ts, cmd = self.q_tasks.get()
                 if ts <= cur_ts:
@@ -319,6 +357,30 @@ class Arduino():
             if time.time()-ts > timeout:
                 print('timeout without connection')
                 break
+
+
+    
+    def flushInput(self):
+        
+        """ 
+        -------------------------------------------------------------------------------------
+        
+        Flush digiital inputs and clear from self.q_tasks
+        
+        -------------------------------------------------------------------------------------
+
+        Notes:
+
+
+        """
+
+        self.ser.flushInput()
+        while not self.q_inputs.empty():
+            self.q_inputs.get()
+
+
+
+
 
 
 

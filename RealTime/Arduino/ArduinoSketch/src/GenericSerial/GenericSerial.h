@@ -11,6 +11,7 @@
 #define CMD_WRITE_LOW 0  // command to digitalWrite low
 #define CMD_WRITE_HIGH 1 // command to digitalWrite high
 #define CMD_MODE_OUT 2   // command to set pinMode to output
+#define CMD_MODE_IN 3   // command to set pinMode to input
 
 class GenericSerial
 {

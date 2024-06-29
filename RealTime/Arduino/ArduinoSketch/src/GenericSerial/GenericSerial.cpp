@@ -42,6 +42,10 @@ void GenericSerial::process()
         {
             switch (this->_buffer[1])
             {
+            case CMD_MODE_IN:
+                pinMode(this->_buffer[0], INPUT);
+                digitalWrite(this->_buffer[0], HIGH); // turn on the pullup
+                break;
             case CMD_MODE_OUT:
                 pinMode(this->_buffer[0], OUTPUT);
                 break;
@@ -61,7 +65,6 @@ void GenericSerial::process()
 void GenericSerial::send(byte buf[])
 /*
   Command for Arduino to write to buffer.
-  Currently not used.
 */
 {
     size_t len = sizeof(buf);
