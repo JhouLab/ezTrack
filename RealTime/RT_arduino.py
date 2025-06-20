@@ -160,6 +160,7 @@ class Arduino():
         
         self.handshake()
         self.io_config()
+        self.flushInput()
         Thread(target=self.io_transmitter, args=()).start()
         print('state: ready')
         self.state = 'ready'
