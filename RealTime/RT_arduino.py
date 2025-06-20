@@ -23,6 +23,7 @@ from threading import Thread
 
 class Arduino():
     
+    
     """ 
     -------------------------------------------------------------------------------------
     
@@ -73,11 +74,13 @@ class Arduino():
 
             keys_dout:: [dict]
                 Should be dictionary where each key is the name for a digital output and each
-                key is the pin ID.
+                item is the pin ID.
 
             keys_din:: [dict]
                 Should be dictionary where each key is the name for a digital output and each
-                key is the pin ID.
+                item is a tuple, corresponding to pin id and whether or not the input needs
+                to be configured as input on Arduino side. Most digital inputs do. However, for inputs on 
+                capacitve touch sensor, this is not the case.
 
             baudrate:: [unsigned integer]
                 Baudrate for communicating with Arduino.
@@ -92,11 +95,13 @@ class Arduino():
                 
             keys_dout:: [dict]
                 Dictionary where each key is the name for a digital output and each
-                key is the pin ID.
+                item is the pin ID.
 
             keys_din:: [dict
-                Dictionary where each key is the name for a digital input and each
-                key is the pin ID.
+               Should be dictionary where each key is the name for a digital output and each
+               item is a tuple, corresponding to pin id and whether or not the input needs
+               to be configured as input on Arduino side. Most digital inputs do. However, for inputs on 
+               capacitve touch sensor, this is not the case.
 
             input_sts:: [dict]
                 Dictionary containing port of each input and corresponding state (0/1).
@@ -199,10 +204,11 @@ class Arduino():
             print('outputs configured')
 
         if self.keys_din is not None:
-            for name, pin in self.keys_din.items():
-                ts = time.time()
-                self.io_send((pin, self.cmnds['setin']), ts)
-            self.input_sts = {x: None for x in self.keys_din.values()}
+            for name, (pin, config) in self.keys_din.items():
+                if config:
+                    ts = time.time()
+                    self.io_send((pin, self.cmnds['setin']), ts)
+            self.input_sts = {x[0]: None for x in self.keys_din.values()}
             print('inputs configured')
       
     
@@ -222,7 +228,7 @@ class Arduino():
         while True:
             cur_ts = time.time()
             hold_tasks = []
-            if self.ser.in_waiting>2:
+            if self.keys_din is not None and self.ser.in_waiting>2:
                 input = self.ser.read_until(expected=self.cmndflg)
                 input = dict(din=input[0], state=input[1], time=time.time())
                 self.input_sts[input['din']] = input['state']
@@ -255,7 +261,8 @@ class Arduino():
         -------------------------------------------------------------------------------------
         Args:
             sig:: [tuple]
-                Tuple of length 2 where first index should be 
+                Tuple of length 2 where first index should be pin and second item is command
+                (low=0, high=1, setout=2, setin=3)
                 
             ts:: [float]
                 Timestamp of signal
