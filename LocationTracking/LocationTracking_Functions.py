@@ -50,9 +50,10 @@ from IPython.display import clear_output, Image, display
 hv.notebook_extension('bokeh')
 warnings.filterwarnings("ignore")
 
+from scipy.ndimage import minimum_filter
 
 
-
+CLIP_BRIGHT_OBJECTS = True
 
 ########################################################################################    
 
@@ -195,11 +196,14 @@ def LoadAndCrop(video_dict,cropmethod=None,fstfile=False,accept_p_frames=False):
 
     #Print video information. Note that max frame is updated later if fewer frames detected
     cap_max = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) 
+    fps=cap.get(cv2.CAP_PROP_FPS)
     print('total frames: {frames}'.format(frames=cap_max))
-    print('nominal fps: {fps}'.format(fps=cap.get(cv2.CAP_PROP_FPS)))
+    print(f'nominal fps: {fps}')
     print('dimensions (h x w): {h},{w}'.format(
         h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
         w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))))
+
+    video_dict['nominal_fps'] = fps
     
     #check for video p-frames
     if accept_p_frames is False:
@@ -417,6 +421,7 @@ def Reference(video_dict,num_frames=100,
             cap.set(cv2.CAP_PROP_POS_FRAMES, framenum)
             ret, frame = cap.read()
             if ret == True:
+                print(f"Using frame: {framenum}")
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 if (video_dict['dsmpl'] < 1):
                     gray = cv2.resize(
@@ -437,7 +442,8 @@ def Reference(video_dict,num_frames=100,
                 pass
     cap.release() 
 
-    reference = np.median(collection,axis=0)
+    reference = np.percentile(collection, 90, axis=0)
+    print(reference.shape)
     image = hv.Image((np.arange(reference.shape[1]),
                       np.arange(reference.shape[0]), 
                       reference)).opts(width=int(reference.shape[1]*video_dict['stretch']['width']),
@@ -446,7 +452,14 @@ def Reference(video_dict,num_frames=100,
                                        cmap='gray',
                                        colorbar=True,
                                        toolbar='below',
-                                       title="Reference Frame") 
+                                       title="Reference Frame")
+
+    _om = np.median(reference)
+    video_dict['reference'] = reference
+    video_dict['overall_median'] = _om
+    reference[reference > _om] = _om
+    video_dict['clipped_reference'] = reference
+
     return reference, image    
 
 
@@ -455,7 +468,11 @@ def Reference(video_dict,num_frames=100,
 
 ########################################################################################
 
-def Locate(cap,tracking_params,video_dict,prior=None):
+
+KERNEL_SIZE = 5
+
+
+def Locate(cap,tracking_params,video_dict,prior=None, clip=False):
     """ 
     -------------------------------------------------------------------------------------
     
@@ -587,18 +604,29 @@ def Locate(cap,tracking_params,video_dict,prior=None):
             frame,
             video_dict.get('crop')
         )
-        
+
         #find difference from reference
         if tracking_params['method'] == 'abs':
             dif = np.absolute(frame-video_dict['reference'])
         elif tracking_params['method'] == 'light':
             dif = frame-video_dict['reference']
         elif tracking_params['method'] == 'dark':
-            dif = video_dict['reference']-frame
+            # Remove pixels brighter than median
+            if clip:
+                _ref = video_dict['clipped_reference']
+                _om = video_dict['overall_median']
+                frame[frame > _om] = _om
+            else:
+                _ref = video_dict['reference']
+            
+            dif = _ref-frame
         dif = dif.astype('int16')
         if 'mask' in video_dict.keys():
             if video_dict['mask']['mask'] is not None:
                     dif[video_dict['mask']['mask']] = 0
+
+        kernel = np.ones((KERNEL_SIZE, KERNEL_SIZE), dtype=np.uint16)
+        dif = minimum_filter(dif, footprint=kernel)
               
         #apply window
         weight = 1 - tracking_params['window_weight']
@@ -746,9 +774,9 @@ def TrackLocation(video_dict,tracking_params):
         if f>0: 
             yprior = np.around(Y[f-1]).astype(int)
             xprior = np.around(X[f-1]).astype(int)
-            ret,dif,com,frame = Locate(cap,tracking_params,video_dict,prior=[yprior,xprior])
+            ret,dif,com,frame = Locate(cap,tracking_params,video_dict,prior=[yprior,xprior], clip=CLIP_BRIGHT_OBJECTS)
         else:
-            ret,dif,com,frame = Locate(cap,tracking_params,video_dict)
+            ret,dif,com,frame = Locate(cap,tracking_params,video_dict, clip=CLIP_BRIGHT_OBJECTS)
                                                 
         if ret == True:          
             Y[f] = com[0]
@@ -786,8 +814,18 @@ def TrackLocation(video_dict,tracking_params):
     df = ROI_Location(video_dict, df) 
     if video_dict['region_names'] is not None:
         print('Defining transitions...')
-        df['ROI_location'] = ROI_linearize(df[video_dict['region_names']])
-        df['ROI_transition'] = ROI_transitions(df['ROI_location'])
+        rnames = video_dict['region_names']
+        if any(x not in df for x in rnames):
+            # Remove any region names that were not defined, otherwise we will get error
+            # later at the df[rnames] step
+            rnames = list(x for x in rnames if x in df)
+            print(f'Some ROI(s) are not defined. After removing from analysis, will analyze ROIs with names: {rnames}')
+            
+        if len(rnames) > 0:
+            # Add column that has region name
+            df['ROI_location'] = ROI_linearize(df[rnames])
+            # Add column of True/False for transitions from one to another
+            df['ROI_transition'] = ROI_transitions(df['ROI_location'])
     
     #update scale, if known
     df = ScaleDistance(video_dict, df=df, column='Distance_px')
@@ -915,7 +953,7 @@ def LocationThresh_View(video_dict,tracking_params,examples=4):
         while ret is False:     
             frm=np.random.randint(video_dict['start'],cap_max) #select random frame
             cap.set(cv2.CAP_PROP_POS_FRAMES,frm) #sets frame to be next to be grabbed
-            ret,dif,com,frame = Locate(cap, tracking_params, video_dict) 
+            ret,dif,com,frame = Locate(cap, tracking_params, video_dict, clip=example > 0) 
 
         #plot original frame
         image_orig = hv.Image((np.arange(frame.shape[1]), np.arange(frame.shape[0]), frame))
@@ -1067,12 +1105,12 @@ def ROI_plot(video_dict):
     
 ########################################################################################    
 
-def ROI_Location(video_dict, location):
+def ROI_Location(video_dict, df):
     """ 
     -------------------------------------------------------------------------------------
     
     For each frame, determine which regions of interest the animal is in.  For each
-    region of interest, boolean array is added to `location` dataframe passed, with 
+    region of interest, boolean array is added to `df` dataframe passed, with 
     column name being the region name.
     
     -------------------------------------------------------------------------------------
@@ -1122,18 +1160,18 @@ def ROI_Location(video_dict, location):
                 'f0' : (only if batch processing)
                         first frame of video [numpy array]
         
-        location:: [pandas.dataframe]
+        df:: [pandas.dataframe]
             Pandas dataframe with frame by frame x and y locations,
             distance travelled, as well as video information and parameter values. 
             Must contain column names 'X' and 'Y'.
 
     -------------------------------------------------------------------------------------
     Returns:
-        location:: [pandas.dataframe]
-            For each region of interest, boolean array is added to `location` dataframe 
+        df:: [pandas.dataframe]
+            For each region of interest, boolean array is added to `df` dataframe 
             passed, with column name being the region name. Additionally, under column
             `ROI_coordinates`, coordinates of vertices of each region of interest are
-            printed. This takes the form of a dictionary of x and y coordinates, e.g.:
+            printed. This takes the form of a dictionary of x and y coordinates, e.g.:any
                 'xs' : [[region 1 x coords], [region 2 x coords]],
                 'ys' : [[region 1 y coords], [region 2 y coords]]
                                       
@@ -1141,39 +1179,59 @@ def ROI_Location(video_dict, location):
     Notes:
     
     """
-    
-    if video_dict['region_names'] == None:
-        return location
 
-    #Create ROI Masks
-    ROI_masks = {}
-    for poly in range(len(video_dict['roi_stream'].data['xs'])):
-        x = np.array(video_dict['roi_stream'].data['xs'][poly]) #x coordinates
-        y = np.array(video_dict['roi_stream'].data['ys'][poly]) #y coordinates
+    region_name_list = video_dict['region_names']
+    
+    if region_name_list == None:
+        return df
+
+    if 'roi_stream' not in video_dict:
+        return df
+
+    rsd = video_dict['roi_stream'].data
+
+    #Create ROI Mask dictionary, key is ROI name
+    ROI_mask_dict = {}
+
+    num_polygons = len(rsd['xs'])
+
+    for idx_poly in range(num_polygons):
+        # Loop through each polygon. Note that the number of polygons might be less than the number of region_names
+        # if the user didn't bother to define all regions.
+        x = np.array(rsd['xs'][idx_poly]) #x coordinates
+        y = np.array(rsd['ys'][idx_poly]) #y coordinates
         xy = np.column_stack((x,y)).astype('uint64') #xy coordinate pairs
         mask = np.zeros(video_dict['reference'].shape) # create empty mask
         cv2.fillPoly(mask, pts =[xy], color=255) #fill polygon  
-        ROI_masks[video_dict['region_names'][poly]] = mask==255 #save to ROI masks as boolean 
+        ROI_mask_dict[region_name_list[idx_poly]] = mask==255 # convert to boolean, and save to ROI_mask_dict
+
+    if num_polygons < len(region_name_list):
+        # Show warning
+        print(f'Warning: specified {len(region_name_list)} region names, but only defined {num_polygons} polygons.')
 
     #Create arrays to store whether animal is within given ROI
-    ROI_location = {}
-    for mask in ROI_masks:
-        ROI_location[mask]=np.full(len(location['Frame']),False,dtype=bool)
+    ROI_bool = {}
+    for region_name in ROI_mask_dict:
+        # Create dictionary of vectors.
+        # key = region_name, value = vector of False, one per frame
+        ROI_bool[region_name]=np.full(len(df['Frame']),False,dtype=bool)
 
     #For each frame assess truth of animal being in each ROI
-    for f in location['Frame']:
-        y,x = location['Y'][f], location['X'][f]
-        for mask in ROI_masks:
-            ROI_location[mask][f] = ROI_masks[mask][int(y),int(x)]
+    for f in df['Frame']:
+        # Loop through frames
+        y,x = df['Y'][f], df['X'][f]
+        for region_name in ROI_mask_dict:
+            # Loop through ROIs, assign True/False
+            ROI_bool[region_name][f] = ROI_mask_dict[region_name][int(y),int(x)]
     
-    #Add data to location data frame
-    for x in ROI_location:
-        location[x]=ROI_location[x]
+    #Add data to df data frame
+    for region_name in ROI_bool:
+        df[region_name]=ROI_bool[region_name]
     
     #Add ROI coordinates
-    location['ROI_coordinates']=str(video_dict['roi_stream'].data)
+    df['ROI_coordinates']=str(video_dict['roi_stream'].data)
     
-    return location
+    return df
 
 
 
@@ -1208,7 +1266,10 @@ def ROI_linearize(rois, null_name = 'non_roi'):
     region_names = rois.columns.values
     rois['ROI_location'] = null_name
     for region in region_names:
-        rois['ROI_location'][rois[region]] = rois['ROI_location'][rois[region]].apply(
+        # Loop through each region
+        bool_vals = rois[region]
+        # Use logical indexing to change only the rows for which animal is in current region
+        rois['ROI_location'][bool_vals] = rois['ROI_location'][bool_vals].apply(
             lambda x: '_'.join([x, region]) if x!=null_name else region
         )
     return rois['ROI_location']
@@ -1740,17 +1801,30 @@ def PlayVideo(video_dict,display_dict,location):
                 cv2.INTER_NEAREST)
         frame = cropframe(frame, video_dict['crop'])
         height, width = int(frame.shape[0]), int(frame.shape[1])
-        fourcc = 0#cv2.VideoWriter_fourcc(*'jpeg') #only writes up to 20 fps, though video read can be 30.
-        writer = cv2.VideoWriter(os.path.join(os.path.normpath(video_dict['dpath']), 'video_output.avi'), 
-                                 fourcc, 20.0, 
+
+        output_file_base = os.path.splitext(video_dict['fpath'])[0] + "_tracked.avi"
+        
+#        fourcc = 'ffv1'   #cv2.VideoWriter_fourcc(*'jpeg') #only writes up to 20 fps, though video read can be 30.
+        writer = cv2.VideoWriter(os.path.join(os.path.normpath(video_dict['dpath']), output_file_base),
+                                 cv2.VideoWriter_fourcc(*'FFV1'), 20.0, 
                                  (width, height),
                                  isColor=False)
 
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    param_start = display_dict['start']
+    param_stop = display_dict['stop']
+    
+    if param_stop is None or param_stop > frame_count:
+        param_stop = frame_count
+    
     #Initialize video play options   
     cap.set(cv2.CAP_PROP_POS_FRAMES,video_dict['start']+display_dict['start']) 
 
     #Play Video
-    for f in range(display_dict['start'],display_dict['stop']):
+    percent_reported = 0
+    
+    for f in range(param_start, param_stop):
         ret, frame = cap.read() #read frame
         if ret == True:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -1765,10 +1839,22 @@ def PlayVideo(video_dict,display_dict,location):
             frame = cropframe(frame, video_dict['crop'])
             markposition = (int(location['X'][f]),int(location['Y'][f]))
             cv2.drawMarker(img=frame,position=markposition,color=255)
-            display_image(frame,display_dict['fps'],display_dict['resize'])
+
             #Save video (if desired). 
             if display_dict['save_video']==True:
                 writer.write(frame) 
+
+            if f % 100 == 0:
+                # Display every nth frame
+                percent_done = (f - param_start) * 100.0 / param_stop
+                cv2.putText(frame, f"{percent_done:0.1f}% done", (5, 25), fontFace=2, fontScale=0.5, color=255)
+                display_image(frame, display_dict['fps'],display_dict['resize'])
+
+                if percent_done > percent_reported:
+#                    print(".", end="")
+                    percent_reported = percent_done
+                
+
         if ret == False:
             print('warning. failed to get video frame')
 

@@ -1,0 +1,6 @@
+.idea
+.ipynb_checkpoints
+
+__pycache__
+2025-*.avi
+2025-*.csv
