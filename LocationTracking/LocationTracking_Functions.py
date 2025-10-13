@@ -413,15 +413,16 @@ def Reference(video_dict,num_frames=100,
         frames = np.linspace(start=video_dict['start'], stop=cap_max, num=num_frames)
     else:
         num_frames = len(frames) #make sure num_frames equals length of passed list
-        
+
     collection = np.zeros((num_frames,h,w))  
+    print(f"Using frames: ", end="")
     for (idx,framenum) in enumerate(frames):    
         grabbed = False
         while grabbed == False: 
             cap.set(cv2.CAP_PROP_POS_FRAMES, framenum)
             ret, frame = cap.read()
             if ret == True:
-                print(f"Using frame: {framenum}")
+                print(f"{int(framenum)}, ", end="")
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 if (video_dict['dsmpl'] < 1):
                     gray = cv2.resize(
@@ -441,16 +442,17 @@ def Reference(video_dict,num_frames=100,
                 framenum = np.random.randint(video_dict['start'],cap_max,1)[0]
                 pass
     cap.release() 
+    print('\n')
 
     reference = np.percentile(collection, 90, axis=0)
     print(reference.shape)
     image = hv.Image((np.arange(reference.shape[1]),
                       np.arange(reference.shape[0]), 
-                      reference)).opts(width=int(reference.shape[1]*video_dict['stretch']['width']),
-                                       height=int(reference.shape[0]*video_dict['stretch']['height']),
+                      reference)).opts(#width=int(reference.shape[1]*video_dict['stretch']['width']),
+                                       #height=int(reference.shape[0]*video_dict['stretch']['height']),
                                        invert_yaxis=True,
-                                       cmap='gray',
-                                       colorbar=True,
+                                       cmap='gray', clim=(0, 255),  # clim forces full 0-255 range
+                                       colorbar=True, data_aspect=1,
                                        toolbar='below',
                                        title="Reference Frame")
 
@@ -958,9 +960,10 @@ def LocationThresh_View(video_dict,tracking_params,examples=4):
         #plot original frame
         image_orig = hv.Image((np.arange(frame.shape[1]), np.arange(frame.shape[0]), frame))
         image_orig.opts(
-            width=int(video_dict['reference'].shape[1]*video_dict['stretch']['width']),
-            height=int(video_dict['reference'].shape[0]*video_dict['stretch']['height']),
+            #width=int(video_dict['reference'].shape[1]*video_dict['stretch']['width']),
+            #height=int(video_dict['reference'].shape[0]*video_dict['stretch']['height']),
             invert_yaxis=True,cmap='gray',toolbar='below',
+            data_aspect=1,  # make sure pixels are square
             title="Frame: " + str(frm))
         orig_overlay = image_orig * hv.Points(([com[1]],[com[0]])).opts(
             color='red',size=20,marker='+',line_width=3) 
@@ -972,9 +975,10 @@ def LocationThresh_View(video_dict,tracking_params,examples=4):
             np.arange(dif.shape[0]), 
             dif))
         image_heat.opts(
-            width=int(dif.shape[1]*video_dict['stretch']['width']),
-            height=int(dif.shape[0]*video_dict['stretch']['height']),
+            #width=int(dif.shape[1]*video_dict['stretch']['width']),
+            #height=int(dif.shape[0]*video_dict['stretch']['height']),
             invert_yaxis=True,cmap='jet',toolbar='below',
+            data_aspect=1,
             title="Frame: " + str(frm - video_dict['start']))
         heat_overlay = image_heat * hv.Points(([com[1]],[com[0]])).opts(
             color='red',size=20,marker='+',line_width=3) 
@@ -1185,7 +1189,8 @@ def ROI_Location(video_dict, df):
     if region_name_list == None:
         return df
 
-    if 'roi_stream' not in video_dict:
+    if 'roi_stream' not in video_dict or video_dict['roi_stream'] is None:
+        # No ROIs were defined
         return df
 
     rsd = video_dict['roi_stream'].data
@@ -1698,12 +1703,17 @@ def Batch_Process(video_dict,tracking_params,bin_dict,accept_p_frames=False):
     return summary_all, layout
 
 
-
+def GetFileBase(video_dict, full_path=True):
+    output_file_base = os.path.splitext(video_dict['file'])[0]
+    if full_path:
+        return os.path.join(os.path.normpath(video_dict['dpath']), output_file_base)
+    else:
+        return output_file_base
 
 
 ########################################################################################        
 
-def PlayVideo(video_dict,display_dict,location):  
+def PlayVideo(video_dict,display_dict,location, file_suffix=""):  
     """ 
     -------------------------------------------------------------------------------------
     
@@ -1785,7 +1795,6 @@ def PlayVideo(video_dict,display_dict,location):
 
     """
 
-
     #Load Video and Set Saving Parameters
     cap = cv2.VideoCapture(video_dict['fpath'])#set file\
     if display_dict['save_video']==True:
@@ -1802,11 +1811,21 @@ def PlayVideo(video_dict,display_dict,location):
         frame = cropframe(frame, video_dict['crop'])
         height, width = int(frame.shape[0]), int(frame.shape[1])
 
-        output_file_base = os.path.splitext(video_dict['fpath'])[0] + "_tracked.avi"
-        
-#        fourcc = 'ffv1'   #cv2.VideoWriter_fourcc(*'jpeg') #only writes up to 20 fps, though video read can be 30.
+        output_file_base = GetFileBase(video_dict, full_path=False) + file_suffix + "_tracked.avi"
+        fps = video_dict['nominal_fps']
+
+        if fps == 0:
+            print(f'Warning: unable to determine original frame rate, substituting 30 fps.')
+            fps = 30
+        else:
+            print(f'Writing video with tracked location. Frame rate matches input frame rate {fps} fps.')
+            
+        # fourcc = cv2.VideoWriter_fourcc(*'FFV1')   # Lossless. Not compatible with ImageJ, but readable by most other programs. Not very space-efficient
+        # fourcc = cv2.VideoWriter_fourcc(*'jpeg')   # only writes up to 20 fps, though video read can be 30.
+        # fourcc = cv2.VideoWriter_fourcc(*'FMP4')   # fragmented MP4. Uses H264 under the hood.
+        fourcc = cv2.VideoWriter_fourcc(*'MP4V')     # H264. 15x more efficient than FFV1. About 2kB per frame.
         writer = cv2.VideoWriter(os.path.join(os.path.normpath(video_dict['dpath']), output_file_base),
-                                 cv2.VideoWriter_fourcc(*'FFV1'), 20.0, 
+                                 fourcc, fps,
                                  (width, height),
                                  isColor=False)
 
@@ -1814,18 +1833,36 @@ def PlayVideo(video_dict,display_dict,location):
 
     param_start = display_dict['start']
     param_stop = display_dict['stop']
-    
-    if param_stop is None or param_stop > frame_count:
-        param_stop = frame_count
+
+    analysis_start = video_dict['start']
+    analysis_end = video_dict['end']
+
+    if analysis_start is None:
+        analysis_start = 0
+    if analysis_end is None:
+        analysis_end = frame_count
+
+    if (param_start is None) or (param_start < analysis_start):
+        param_start = analysis_start
+        
+    if (param_stop is None) or (param_stop > analysis_end):
+        param_stop = analysis_end
     
     #Initialize video play options   
-    cap.set(cv2.CAP_PROP_POS_FRAMES,video_dict['start']+display_dict['start']) 
+    cap.set(cv2.CAP_PROP_POS_FRAMES,video_dict['start'])
+    print(f'Reading video frames {param_start}-{param_stop}')
+
+    if analysis_start != 0:
+        print(f'   (corresponding to analysis frames {param_start-analysis_start}-{param_stop-analysis_start})')
 
     #Play Video
     percent_reported = 0
+
+    USE_EXT_VIEWER = True
     
     for f in range(param_start, param_stop):
         ret, frame = cap.read() #read frame
+
         if ret == True:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             if (video_dict['dsmpl'] < 1):
@@ -1837,33 +1874,52 @@ def PlayVideo(video_dict,display_dict,location):
                     ),
                     cv2.INTER_NEAREST)
             frame = cropframe(frame, video_dict['crop'])
-            markposition = (int(location['X'][f]),int(location['Y'][f]))
+
+            f2 = f - analysis_start   # Frame in analysis arrays        
+            
+            markposition = (int(location['X'][f2]),int(location['Y'][f2]))
             cv2.drawMarker(img=frame,position=markposition,color=255)
 
             #Save video (if desired). 
-            if display_dict['save_video']==True:
+            if display_dict['save_video']:
                 writer.write(frame) 
 
-            if f % 100 == 0:
+            if f % 1000 == 0:
                 # Display every nth frame
-                percent_done = (f - param_start) * 100.0 / param_stop
-                cv2.putText(frame, f"{percent_done:0.1f}% done", (5, 25), fontFace=2, fontScale=0.5, color=255)
-                display_image(frame, display_dict['fps'],display_dict['resize'])
-
-                if percent_done > percent_reported:
-#                    print(".", end="")
-                    percent_reported = percent_done
-                
+                percent_done = (f - param_start) * 100.0 / (param_stop - param_start)
+                if USE_EXT_VIEWER:
+                    cv2.putText(frame, f"frame {f}/{param_stop}", (5, 25), fontFace=2, fontScale=0.5, color=255)
+                    cv2.imshow("preview", frame)
+                    cv2.waitKey(1)
+                    if np.ceil(percent_done) > percent_reported:
+                        print(".", end="")
+                        percent_reported = np.ceil(percent_done)
+                else:
+                    cv2.putText(frame, f"{percent_done:0.1f}% done", (5, 25), fontFace=2, fontScale=0.5, color=255)
+                    display_image(frame, display_dict['fps'],display_dict['resize'])
 
         if ret == False:
-            print('warning. failed to get video frame')
+            print(f'warning. failed to get video frame{f}')
+            break
+
+    if USE_EXT_VIEWER:
+        print('\n')
 
     #Close video window and video writer if open
     print('Done playing segment')
-    if display_dict['save_video']==True:
+
+    if USE_EXT_VIEWER:
+        #Close video window and video writer if open
+        cv2.destroyAllWindows()
+        cv2.waitKey(1)
+        
+    if display_dict['save_video']:
+        print('Closing cv2.writer object')
         writer.release()
 
+
 def display_image(frame,fps,resize):
+    # Shows image in Jupyter notebook. This seems slower than cv2, which shows in external viewer
     img = PIL.Image.fromarray(frame, "L")
     img = img.resize(size=resize) if resize else img
     buffer = BytesIO()
@@ -1871,8 +1927,6 @@ def display_image(frame,fps,resize):
     display(Image(data=buffer.getvalue()))
     time.sleep(1/fps)
     clear_output(wait=True)
-
-    
     
 
     
@@ -2095,7 +2149,7 @@ def showtrace(video_dict, location, color="red",alpha=.8,size=3):
     Notes:
 
     """
-    
+
     video_dict['roi_stream'] = video_dict['roi_stream'] if 'roi_stream' in video_dict else None
     if video_dict['roi_stream'] != None:
         lst = []
@@ -2108,9 +2162,9 @@ def showtrace(video_dict, location, color="red",alpha=.8,size=3):
     image = hv.Image((np.arange(video_dict['reference'].shape[1]),
                       np.arange(video_dict['reference'].shape[0]),
                       video_dict['reference'])
-                    ).opts(width=int(video_dict['reference'].shape[1]*video_dict['stretch']['width']),
-                           height=int(video_dict['reference'].shape[0]*video_dict['stretch']['height']),
-                           invert_yaxis=True,cmap='gray',toolbar='below',
+                    ).opts(#width=int(video_dict['reference'].shape[1]*video_dict['stretch']['width']),
+                           #height=int(video_dict['reference'].shape[0]*video_dict['stretch']['height']),
+                           invert_yaxis=True,cmap='gray',toolbar='below', data_aspect=1,
                            title="Motion Trace")
     
     points = hv.Scatter(np.array([location['X'],location['Y']]).T).opts(color='red',alpha=alpha,size=size)
@@ -2206,9 +2260,10 @@ def Heatmap (video_dict, location, sigma=None):
     heatmap = (heatmap / heatmap.max())*255
     
     map_i = hv.Image((np.arange(heatmap.shape[1]), np.arange(heatmap.shape[0]), heatmap))
-    map_i.opts(width=int(heatmap.shape[1]*video_dict['stretch']['width']),
-           height=int(heatmap.shape[0]*video_dict['stretch']['height']),
+    map_i.opts( #width=int(heatmap.shape[1]*video_dict['stretch']['width']),
+#           height=int(heatmap.shape[0]*video_dict['stretch']['height']),
            invert_yaxis=True, cmap='jet', alpha=1,
+           data_aspect=1, # aspect=1,
            colorbar=False, toolbar='below', title="Heatmap")
     
     return map_i
