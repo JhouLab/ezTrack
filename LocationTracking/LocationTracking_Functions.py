@@ -1813,18 +1813,19 @@ def PlayVideo(video_dict,display_dict,location, file_suffix=""):
 
         output_file_base = GetFileBase(video_dict, full_path=False) + file_suffix + "_tracked.avi"
         fps = video_dict['nominal_fps']
+        fpath = os.path.join(os.path.normpath(video_dict['dpath']), output_file_base)
 
         if fps == 0:
             print(f'Warning: unable to determine original frame rate, substituting 30 fps.')
             fps = 30
         else:
-            print(f'Writing video with tracked location. Frame rate matches input frame rate {fps} fps.')
+            print(f'Writing video file, input frame rate {fps} fps: {fpath}')
             
         # fourcc = cv2.VideoWriter_fourcc(*'FFV1')   # Lossless. Not compatible with ImageJ, but readable by most other programs. Not very space-efficient
         # fourcc = cv2.VideoWriter_fourcc(*'jpeg')   # only writes up to 20 fps, though video read can be 30.
         # fourcc = cv2.VideoWriter_fourcc(*'FMP4')   # fragmented MP4. Uses H264 under the hood.
         fourcc = cv2.VideoWriter_fourcc(*'MP4V')     # H264. 15x more efficient than FFV1. About 2kB per frame.
-        writer = cv2.VideoWriter(os.path.join(os.path.normpath(video_dict['dpath']), output_file_base),
+        writer = cv2.VideoWriter(fpath,
                                  fourcc, fps,
                                  (width, height),
                                  isColor=False)
