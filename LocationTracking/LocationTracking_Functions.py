@@ -757,7 +757,7 @@ def TrackLocation(video_dict,tracking_params):
     Notes:
     
     """
-          
+
     #load video
     cap = cv2.VideoCapture(video_dict['fpath'])#set file
     cap.set(cv2.CAP_PROP_POS_FRAMES,video_dict['start']) #set starting frame
@@ -791,13 +791,13 @@ def TrackLocation(video_dict,tracking_params):
             X = X[:f] #Amend length of X vector
             Y = Y[:f] #Amend length of Y vector
             D = D[:f] #Amend length of D vector
-            break   
-            
+            break
+
     #release video
     cap.release()
     time.sleep(.2) #allow printing
     print('total frames processed: {f}\n'.format(f=len(D)))
-    
+
     #create pandas dataframe
     df = pd.DataFrame(
     {'File' : video_dict['file'],
@@ -811,7 +811,7 @@ def TrackLocation(video_dict,tracking_params):
      'Y': Y,
      'Distance_px': D
     })
-    
+
     #add region of interest info
     df = ROI_Location(video_dict, df) 
     if video_dict['region_names'] is not None:
@@ -822,7 +822,7 @@ def TrackLocation(video_dict,tracking_params):
             # later at the df[rnames] step
             rnames = list(x for x in rnames if x in df)
             print(f'Some ROI(s) are not defined. After removing from analysis, will analyze ROIs with names: {rnames}')
-            
+
         if len(rnames) > 0:
             # Add column that has region name
             df['ROI_location'] = ROI_linearize(df[rnames])
@@ -1812,8 +1812,10 @@ def PlayVideo(video_dict,display_dict,location, file_suffix=""):
         height, width = int(frame.shape[0]), int(frame.shape[1])
 
         output_file_base = GetFileBase(video_dict, full_path=False) + file_suffix + "_tracked.avi"
+        output_file_base2 = GetFileBase(video_dict, full_path=False) + file_suffix + "_tracked_fast.avi"
         fps = video_dict['nominal_fps']
         fpath = os.path.join(os.path.normpath(video_dict['dpath']), output_file_base)
+        fpath2 = os.path.join(os.path.normpath(video_dict['dpath']), output_file_base2)
 
         if fps == 0:
             print(f'Warning: unable to determine original frame rate, substituting 30 fps.')
@@ -1829,6 +1831,12 @@ def PlayVideo(video_dict,display_dict,location, file_suffix=""):
                                  fourcc, fps,
                                  (width, height),
                                  isColor=False)
+
+        writer2 = cv2.VideoWriter(fpath2,
+                                 fourcc, 30,
+                                 (width, height),
+                                 isColor=False)
+
 
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
@@ -1864,44 +1872,47 @@ def PlayVideo(video_dict,display_dict,location, file_suffix=""):
     for f in range(param_start, param_stop):
         ret, frame = cap.read() #read frame
 
-        if ret == True:
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            if (video_dict['dsmpl'] < 1):
-                frame = cv2.resize(
-                    frame,
-                    (
-                        int(frame.shape[1]*video_dict['dsmpl']),
-                        int(frame.shape[0]*video_dict['dsmpl'])
-                    ),
-                    cv2.INTER_NEAREST)
-            frame = cropframe(frame, video_dict['crop'])
-
-            f2 = f - analysis_start   # Frame in analysis arrays        
-            
-            markposition = (int(location['X'][f2]),int(location['Y'][f2]))
-            cv2.drawMarker(img=frame,position=markposition,color=255)
-
-            #Save video (if desired). 
-            if display_dict['save_video']:
-                writer.write(frame) 
-
-            if f % 1000 == 0:
-                # Display every nth frame
-                percent_done = (f - param_start) * 100.0 / (param_stop - param_start)
-                if USE_EXT_VIEWER:
-                    cv2.putText(frame, f"frame {f}/{param_stop}", (5, 25), fontFace=2, fontScale=0.5, color=255)
-                    cv2.imshow("preview", frame)
-                    cv2.waitKey(1)
-                    if np.ceil(percent_done) > percent_reported:
-                        print(".", end="")
-                        percent_reported = np.ceil(percent_done)
-                else:
-                    cv2.putText(frame, f"{percent_done:0.1f}% done", (5, 25), fontFace=2, fontScale=0.5, color=255)
-                    display_image(frame, display_dict['fps'],display_dict['resize'])
-
         if ret == False:
             print(f'warning. failed to get video frame{f}')
             break
+
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        if (video_dict['dsmpl'] < 1):
+            frame = cv2.resize(
+                frame,
+                (
+                    int(frame.shape[1]*video_dict['dsmpl']),
+                    int(frame.shape[0]*video_dict['dsmpl'])
+                ),
+                cv2.INTER_NEAREST)
+        frame = cropframe(frame, video_dict['crop'])
+
+        f2 = f - analysis_start   # Frame in analysis arrays        
+
+        markposition = (int(location['X'][f2]),int(location['Y'][f2]))
+        cv2.drawMarker(img=frame,position=markposition,color=255)
+
+        #Save video (if desired). 
+        if display_dict['save_video']:
+            writer.write(frame)
+
+        if f % fps == 0:
+            # Save every 15th frame to a second file
+            writer2.write(frame)
+
+        if f % 1000 == 0:
+            # Display every nth frame
+            percent_done = (f - param_start) * 100.0 / (param_stop - param_start)
+            if USE_EXT_VIEWER:
+                cv2.putText(frame, f"frame {f}/{param_stop}", (5, 25), fontFace=2, fontScale=0.5, color=255)
+                cv2.imshow("preview", frame)
+                cv2.waitKey(1)
+                if np.ceil(percent_done) > percent_reported:
+                    print(".", end="")
+                    percent_reported = np.ceil(percent_done)
+            else:
+                cv2.putText(frame, f"{percent_done:0.1f}% done", (5, 25), fontFace=2, fontScale=0.5, color=255)
+                display_image(frame, display_dict['fps'],display_dict['resize'])
 
     if USE_EXT_VIEWER:
         print('\n')
@@ -1917,6 +1928,7 @@ def PlayVideo(video_dict,display_dict,location, file_suffix=""):
     if display_dict['save_video']:
         print('Closing cv2.writer object')
         writer.release()
+        writer2.release()
 
 
 def display_image(frame,fps,resize):
@@ -1928,146 +1940,7 @@ def display_image(frame,fps,resize):
     display(Image(data=buffer.getvalue()))
     time.sleep(1/fps)
     clear_output(wait=True)
-    
-
-    
-########################################################################################
-
-def PlayVideo_ext(video_dict,display_dict,location,crop=None):  
-    """ 
-    -------------------------------------------------------------------------------------
-    
-    Play portion of video back, displaying animal's estimated location
-
-    -------------------------------------------------------------------------------------
-    Args:
-        video_dict:: [dict]
-            Dictionary with the following keys:
-                'dpath' : directory containing files [str]
-                'file' : filename with extension, e.g. 'myvideo.wmv' [str]
-                'start' : frame at which to start. 0-based [int]
-                'end' : frame at which to end.  set to None if processing 
-                        whole video [int]
-                'region_names' : list of names of regions.  if no regions, set to None
-                'dsmpl' : proptional degree to which video should be downsampled
-                        by (0-1).
-                'stretch' : Dictionary used to alter display of frames, with the following keys:
-                        'width' : proportion by which to stretch frame width [float]
-                        'height' : proportion by which to stretch frame height [float]
-                        *Does not influence actual processing, unlike dsmpl.
-                'reference': Reference image that the current frame is compared to. [numpy.array]
-                'roi_stream' : Holoviews stream object enabling dynamic selection in response to 
-                               selection tool. `poly_stream.data` contains x and y coordinates of roi 
-                               vertices. [hv.streams.stream]
-                'crop' : Enables dynamic box selection of cropping parameters.  
-                         Holoviews stream object enabling dynamic selection in response to 
-                         `stream.data` contains x and y coordinates of crop boundary vertices.
-                         [hv.streams.BoxEdit]
-                'mask' : [dict]
-                    Dictionary with the following keys:
-                        'mask' : boolean numpy array identifying regions to exlude
-                                 from analysis.  If no such regions, equal to
-                                 None. [bool numpy array)   
-                        'mask_stream' : Holoviews stream object enabling dynamic selection 
-                                in response to selection tool. `mask_stream.data` contains 
-                                x and y coordinates of region vertices. [holoviews polystream]
-                'scale:: [dict]
-                        Dictionary with the following keys:
-                            'px_distance' : distance between reference points, in pixels [numeric]
-                            'true_distance' : distance between reference points, in desired scale 
-                                               (e.g. cm) [numeric]
-                            'true_scale' : string containing name of scale (e.g. 'cm') [str]
-                            'factor' : ratio of desired scale to pixel (e.g. cm/pixel [numeric]
-                'ftype' : (only if batch processing) 
-                          video file type extension (e.g. 'wmv') [str]
-                'FileNames' : (only if batch processing)
-                              List of filenames of videos in folder to be batch 
-                              processed.  [list]
-                'f0' : (only if batch processing)
-                        first frame of video [numpy array]
-                
-        display_dict:: [dict]
-            Dictionary with the following keys:
-                'start' : start point of video segment in frames [int]
-                'end' : end point of video segment in frames [int]
-                'fps' : frames per second of video file/files to be processed [int]
-                'save_video' : option to save video if desired [bool]
-                               Currently, will be saved at 20 fps even if video 
-                               is something else
-                               
-        location:: [pandas.dataframe]
-            Pandas dataframe with frame by frame x and y locations,
-            distance travelled, as well as video information and parameter values. 
-            Additionally, for each region of interest, boolean array indicating whether 
-            animal is in the given region for each frame. 
-  
-    
-    -------------------------------------------------------------------------------------
-    Returns:
-        Nothing returned
-    
-    -------------------------------------------------------------------------------------
-    Notes:
-
-    """
-
-    #Load Video and Set Saving Parameters
-    cap = cv2.VideoCapture(video_dict['fpath'])#set file\
-    if display_dict['save_video']==True:
-        ret, frame = cap.read() #read frame
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        if (video_dict['dsmpl'] < 1):
-            frame = cv2.resize(
-                frame,
-                (
-                    int(frame.shape[1]*video_dict['dsmpl']),
-                    int(frame.shape[0]*video_dict['dsmpl'])
-                ),
-                cv2.INTER_NEAREST)
-        frame = cropframe(frame, crop)
-        height, width = int(frame.shape[0]), int(frame.shape[1])
-        fourcc = 0#cv2.VideoWriter_fourcc(*'jpeg') #only writes up to 20 fps, though video read can be 30.
-        writer = cv2.VideoWriter(os.path.join(os.path.normpath(video_dict['dpath']), 'video_output.avi'), 
-                                 fourcc, 20.0, 
-                                 (width, height),
-                                 isColor=False)
-
-    #Initialize video play options   
-    cap.set(cv2.CAP_PROP_POS_FRAMES,video_dict['start']+display_dict['start']) 
-    rate = int(1000/display_dict['fps']) 
-
-    #Play Video
-    for f in range(display_dict['start'],display_dict['stop']):
-        ret, frame = cap.read() #read frame
-        if ret == True:
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            if (video_dict['dsmpl'] < 1):
-                frame = cv2.resize(
-                    frame,
-                    (
-                        int(frame.shape[1]*video_dict['dsmpl']),
-                        int(frame.shape[0]*video_dict['dsmpl'])
-                    ),
-                    cv2.INTER_NEAREST)
-            frame = cropframe(frame, crop)
-            markposition = (int(location['X'][f]),int(location['Y'][f]))
-            cv2.drawMarker(img=frame,position=markposition,color=255)
-            cv2.imshow("preview",frame)
-            cv2.waitKey(rate)
-            #Save video (if desired). 
-            if display_dict['save_video']==True:
-                writer.write(frame) 
-        if ret == False:
-            print('warning. failed to get video frame')
-
-    #Close video window and video writer if open        
-    cv2.destroyAllWindows()
-    _=cv2.waitKey(1) 
-    if display_dict['save_video']==True:
-        writer.release()
-
-    
-    
+        
     
     
 ########################################################################################

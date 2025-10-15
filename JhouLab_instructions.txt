@@ -1,0 +1,29 @@
+
+FIRST TIME INSTRUCTIONS:
+
+Install miniconda, then open conda prompt (not regular cmd.exe), and enter: conda init cmd.exe
+
+This allows "conda" command to be accessible from normal cmd.exe prompt, which you can launch from GitHub Desktop into the ezTrack repository folder, which is essential for this to work.
+
+Now clone ezTrack from here: https://github.com/JhouLab/ezTrack
+
+Then follow instructions here: https://github.com/denisecailab/ezTrack/wiki/Installation
+
+In brief, type the following into command prompt:
+
+conda create -y -n ezTrack -c conda-forge python=3.9.16 jupyter=1.0.0 numpy=1.24 scipy=1.11.1 pandas=2.0.3 opencv=4.7.0 holoviews=1.15.0 bokeh=2.4.0 pyviz_comms=2.1 jinja2=3.1.2 scikit-learn=1.3.0 matplotlib=3.7.2 tqdm=4.65.0
+
+Need to install one more package so that hv.save() will work:
+
+conda install selenium
+
+
+
+INSTRUCTIONS AFTER FIRST TIME:
+
+Launch cmd.exe from GitHub Desktop by right-clicking repository titlebar, and selecting "Open in Command Prompt".
+
+Type: conda activate ezTrack
+
+Type: jupyter lab
+
