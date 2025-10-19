@@ -1,7 +1,9 @@
 
 FIRST TIME INSTRUCTIONS:
 
-Install miniconda, then open conda prompt (not regular cmd.exe), and enter: conda init cmd.exe
+Install miniconda, then open conda prompt (not regular cmd.exe), and enter:
+
+conda init cmd.exe
 
 This allows "conda" command to be accessible from normal cmd.exe prompt, which you can launch from GitHub Desktop into the ezTrack repository folder, which is essential for this to work.
 
