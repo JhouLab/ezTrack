@@ -13,7 +13,6 @@ ROI_Location
 Batch_LoadFiles
 Batch_Process
 PlayVideo
-PlayVideo_ext
 showtrace
 Heatmap
 DistanceTool
@@ -56,6 +55,72 @@ from scipy.ndimage import minimum_filter
 CLIP_BRIGHT_OBJECTS = True
 
 ########################################################################################    
+
+
+def CountFrames(video_dict):
+    """ 
+    Returns:
+        Count of actual frames in video (use this if we suspect metadata is not accurate)
+        
+    """
+    
+    #Upoad file and check that it exists
+    video_dict['fpath'] = os.path.join(os.path.normpath(video_dict['dpath']), video_dict['file'])
+    if os.path.isfile(video_dict['fpath']):
+        print('file: {file}'.format(file=video_dict['fpath']))
+        cap = cv2.VideoCapture(video_dict['fpath'])
+    else:
+        raise FileNotFoundError('{file} not found. Check that directory and file names are correct'.format(
+            file=video_dict['fpath']))
+
+    #Print video information. Note that max frame is updated later if fewer frames detected
+    cap_max = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) 
+    fps=cap.get(cv2.CAP_PROP_FPS)
+    print('total frames from metadata: {frames}'.format(frames=cap_max))
+    print(f'nominal fps: {fps}')
+    print(f'Duration: {cap_max / fps / 60 / 60:.2f} hours')
+    print('dimensions (h x w): {h},{w}'.format(
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))))
+
+    video_dict['nominal_fps'] = fps
+    
+    #check for video p-frames
+    check_p_frames(cap)
+    
+    #Set first frame
+    cap.set(cv2.CAP_PROP_POS_FRAMES, video_dict['start']) 
+    ret, frame = cap.read()
+
+    if frame is None:
+        print("Can't find starting frame.")
+        return None, None
+        
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    if (video_dict['dsmpl'] < 1):
+        frame = cv2.resize(
+                    frame,
+                    (
+                        int(frame.shape[1]*video_dict['dsmpl']),
+                        int(frame.shape[0]*video_dict['dsmpl'])
+                    ),
+                    cv2.INTER_NEAREST)
+    video_dict['f0'] = frame
+
+    # If we don't trust the metadata, we can count actual frames. This will take a while, and usually is not necessary.
+    frame_count = 0
+    print('Frame count: ', end="")
+    while ret:
+        frame_count += 1
+        if frame_count % 2500 == 0:
+            print(f' {frame_count}', end="")
+        ret, _ = cap.read()
+            
+    cap.release()
+    print(f'\n\nActual frames: {frame_count}')
+    video_dict['end'] = frame_count
+    return frame_count
+
 
 def LoadAndCrop(video_dict,cropmethod=None,fstfile=False,accept_p_frames=False):
     """ 
@@ -199,6 +264,7 @@ def LoadAndCrop(video_dict,cropmethod=None,fstfile=False,accept_p_frames=False):
     fps=cap.get(cv2.CAP_PROP_FPS)
     print('total frames: {frames}'.format(frames=cap_max))
     print(f'nominal fps: {fps}')
+    print(f'Duration: {cap_max / fps / 60 / 60:.2f} hours')
     print('dimensions (h x w): {h},{w}'.format(
         h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
         w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))))
@@ -211,7 +277,12 @@ def LoadAndCrop(video_dict,cropmethod=None,fstfile=False,accept_p_frames=False):
     
     #Set first frame
     cap.set(cv2.CAP_PROP_POS_FRAMES, video_dict['start']) 
-    ret, frame = cap.read() 
+    ret, frame = cap.read()
+
+    if frame is None:
+        print("Can't find starting frame.")
+        return None, None
+        
     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     if (video_dict['dsmpl'] < 1):
         frame = cv2.resize(
@@ -222,7 +293,6 @@ def LoadAndCrop(video_dict,cropmethod=None,fstfile=False,accept_p_frames=False):
                     ),
                     cv2.INTER_NEAREST)
     video_dict['f0'] = frame
-    cap.release()
 
     #Make first image reference frame on which cropping can be performed
     image = hv.Image((np.arange(frame.shape[1]), np.arange(frame.shape[0]), frame))
@@ -236,6 +306,19 @@ def LoadAndCrop(video_dict,cropmethod=None,fstfile=False,accept_p_frames=False):
         title="First Frame.  Crop if Desired"
     )
     
+    def centers_box(data):
+        if data is None:
+            return hv.Labels(([], [], []))
+        try:
+            x_ls = [(a + b)/2 for a, b in zip(data['x0'], data['x1'])]
+            y_ls = [(a + b)/2 for a, b in zip(data['y0'], data['y1'])]
+        except Exception as e:
+            print(f'centers_box error: {e}')
+            print(data)
+            x_ls, y_ls = [], []
+        rois = video_dict['crop_names'][:len(x_ls)]
+        return hv.Labels((x_ls, y_ls, rois))
+    
     #Create polygon element on which to draw and connect via stream to poly drawing tool
     if cropmethod==None:
         image.opts(title="First Frame")
@@ -244,17 +327,17 @@ def LoadAndCrop(video_dict,cropmethod=None,fstfile=False,accept_p_frames=False):
     
     if cropmethod=='Box':         
         box = hv.Polygons([])
-        box.opts(alpha=.5)
-        video_dict['crop'] = streams.BoxEdit(source=box,num_objects=1)     
-        return (image*box), video_dict
-    
-    
+        box_stream = streams.BoxEdit(source=box,num_objects=len(video_dict['crop_names']))
+        box.opts(alpha=.5, active_tools=['box_edit'])
+        dmap = hv.DynamicMap(centers_box, streams=[box_stream])
+        video_dict['crop'] = box_stream
+        return (image*box*dmap), video_dict
     
     
 
 ########################################################################################
 
-def cropframe(frame, crop=None):
+def cropframe(frame, crop=None, crop_num=0):
     """ 
     -------------------------------------------------------------------------------------
     
@@ -280,8 +363,8 @@ def cropframe(frame, crop=None):
     """
     
     try:
-        Xs=[crop.data['x0'][0],crop.data['x1'][0]]
-        Ys=[crop.data['y0'][0],crop.data['y1'][0]]
+        Xs=[crop.data['x0'][crop_num],crop.data['x1'][crop_num]]
+        Ys=[crop.data['y0'][crop_num],crop.data['y1'][crop_num]]
         fxmin,fxmax=int(min(Xs)), int(max(Xs))
         fymin,fymax=int(min(Ys)), int(max(Ys))
         return frame[fymin:fymax,fxmin:fxmax]
@@ -295,7 +378,8 @@ def cropframe(frame, crop=None):
 ########################################################################################
 
 def Reference(video_dict,num_frames=100,
-              altfile=False,fstfile=False,frames=None):
+              altfile=False,fstfile=False,frames=None,
+             crop_num=0):
     """ 
     -------------------------------------------------------------------------------------
     
@@ -399,18 +483,22 @@ def Reference(video_dict,num_frames=100,
                         int(frame.shape[0]*video_dict['dsmpl'])
                     ),
                     cv2.INTER_NEAREST)
+
     frame = cropframe(
         frame, 
-        video_dict.get('crop')
+        video_dict.get('crop'),
+        crop_num
     )
     h,w = frame.shape[0], frame.shape[1]
     cap_max = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) 
     cap_max = int(video_dict['end']) if video_dict['end'] is not None else cap_max
+    print(f"Will sample {num_frames} frames between {video_dict['start']} and {cap_max - 2}")
     
     #Collect subset of frames
     if frames is None:
         #frames = np.random.randint(video_dict['start'],cap_max,num_frames)
-        frames = np.linspace(start=video_dict['start'], stop=cap_max, num=num_frames)
+        frames = np.linspace(start=video_dict['start'], stop=cap_max - 2, num=num_frames)
+        breakpoint()
     else:
         num_frames = len(frames) #make sure num_frames equals length of passed list
 
@@ -434,12 +522,15 @@ def Reference(video_dict,num_frames=100,
                         cv2.INTER_NEAREST)
                 gray = cropframe(
                     gray, 
-                    video_dict.get('crop')
+                    video_dict.get('crop'),
+                    crop_num
                 )
                 collection[idx,:,:]=gray
                 grabbed = True
             elif ret == False:
+                print(f'\nFailed to grab frame {framenum}, will reset to ', end="")
                 framenum = np.random.randint(video_dict['start'],cap_max,1)[0]
+                print(f'{framenum} to try again')
                 pass
     cap.release() 
     print('\n')
@@ -454,18 +545,32 @@ def Reference(video_dict,num_frames=100,
                                        cmap='gray', clim=(0, 255),  # clim forces full 0-255 range
                                        colorbar=True, data_aspect=1,
                                        toolbar='below',
-                                       title="Reference Frame")
+                                       title="Ref: " + video_dict['crop_names'][crop_num])
 
     _om = np.median(reference)
-    video_dict['reference'] = reference
-    video_dict['overall_median'] = _om
+
+    if not 'reference' in video_dict:
+        video_dict['reference'] = []
+    if not 'overall_median' in video_dict:
+        video_dict['overall_median'] = []
+    if not 'clipped_reference' in video_dict:
+        video_dict['clipped_reference'] = []
+
+    while len(video_dict['reference']) <= crop_num:
+        video_dict['reference'].append(None)
+    while len(video_dict['overall_median']) <= crop_num:
+        video_dict['overall_median'].append(None)
+    while len(video_dict['clipped_reference']) <= crop_num:
+        video_dict['clipped_reference'].append(None)
+
+    video_dict['reference'][crop_num] = reference
+    video_dict['overall_median'][crop_num] = _om
+
+    # Remove pixels brighter than the median
     reference[reference > _om] = _om
-    video_dict['clipped_reference'] = reference
+    video_dict['clipped_reference'][crop_num] = reference
 
     return reference, image    
-
-
-
 
 
 ########################################################################################
@@ -474,7 +579,7 @@ def Reference(video_dict,num_frames=100,
 KERNEL_SIZE = 5
 
 
-def Locate(cap,tracking_params,video_dict,prior=None, clip=False):
+def Locate(cap,tracking_params,video_dict,prior=None, clip=False, crop_num=0):
     """ 
     -------------------------------------------------------------------------------------
     
@@ -587,46 +692,48 @@ def Locate(cap,tracking_params,video_dict,prior=None, clip=False):
     
     #set window dimensions
     if prior != None and tracking_params['use_window']==True:
+        # This doesn't work with multiple animals
         window_size = tracking_params['window_size']//2
         ymin,ymax = prior[0]-window_size, prior[0]+window_size
         xmin,xmax = prior[1]-window_size, prior[1]+window_size
 
-    if ret == True:
+    if not ret:
+        return ret, None, None, frame
         
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        if (video_dict['dsmpl'] < 1):
-            frame = cv2.resize(
-                frame,
-                (
-                    int(frame.shape[1]*video_dict['dsmpl']),
-                    int(frame.shape[0]*video_dict['dsmpl'])
-                ),
-                cv2.INTER_NEAREST)
-        frame = cropframe(
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    if (video_dict['dsmpl'] < 1):
+        frame = cv2.resize(
             frame,
-            video_dict.get('crop')
-        )
+            (
+                int(frame.shape[1]*video_dict['dsmpl']),
+                int(frame.shape[0]*video_dict['dsmpl'])
+            ),
+            cv2.INTER_NEAREST)
 
+#        ref1 = video_dict['reference'][crop_num]
+#        ref2 = video_dict['clipped_reference'][crop_num]
+    
         #find difference from reference
+    def find_diff(frame, tracking_params,video_dict,prior, clip, crop_num):
         if tracking_params['method'] == 'abs':
-            dif = np.absolute(frame-video_dict['reference'])
+            dif = np.absolute(frame-video_dict['reference'][crop_num])
         elif tracking_params['method'] == 'light':
-            dif = frame-video_dict['reference']
+            dif = frame-video_dict['reference'][crop_num]
         elif tracking_params['method'] == 'dark':
             # Remove pixels brighter than median
             if clip:
-                _ref = video_dict['clipped_reference']
-                _om = video_dict['overall_median']
+                _ref = video_dict['clipped_reference'][crop_num]
+                _om = video_dict['overall_median'][crop_num]
                 frame[frame > _om] = _om
             else:
-                _ref = video_dict['reference']
-            
+                _ref = video_dict['reference'][crop_num]
+
             dif = _ref-frame
         dif = dif.astype('int16')
         if 'mask' in video_dict.keys():
             if video_dict['mask']['mask'] is not None:
                     dif[video_dict['mask']['mask']] = 0
-
+    
         kernel = np.ones((KERNEL_SIZE, KERNEL_SIZE), dtype=np.uint16)
         dif = minimum_filter(dif, footprint=kernel)
               
@@ -654,14 +761,33 @@ def Locate(cap,tracking_params,video_dict,prior=None, clip=False):
                     x= int(cap.get(cv2.CAP_PROP_POS_FRAMES)-1-video_dict['start'])))
             
         com=ndimage.measurements.center_of_mass(dif)
-        return ret, dif, com, frame
-    
-    else:
-        return ret, None, None, frame
+        return dif, com, frame
 
-    
-    
-    
+    if crop_num < 0:
+        if 'num_animals' in video_dict:
+            n = video_dict['num_animals']
+            start_animal = 0
+        else:
+            n = 1
+            start_animal = 0
+    else:
+        n = 1
+        start_animal = crop_num
+
+    end_animal = start_animal + n
+        
+    # Loop through all animals
+    dif = [None] * n
+    com = [None] * n
+
+    idx = 0
+    for x in range(start_animal, end_animal):
+        frame_crop = cropframe(frame, video_dict.get('crop'), crop_num=x)
+        dif[idx], com[idx], frame_out = find_diff(frame_crop, tracking_params,video_dict,prior, clip, crop_num=x)
+        idx = idx + 1
+
+    return ret, dif, com, frame_out  # Note that only one frame is returned, which is the last one. Currently the only code that uses this return value calls it with n=1, so this is OK for now.
+
     
 ########################################################################################        
 
@@ -762,55 +888,76 @@ def TrackLocation(video_dict,tracking_params):
     cap = cv2.VideoCapture(video_dict['fpath'])#set file
     cap.set(cv2.CAP_PROP_POS_FRAMES,video_dict['start']) #set starting frame
     cap_max = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) 
-    cap_max = int(video_dict['end']) if video_dict['end'] is not None else cap_max  
+    cap_max = int(video_dict['end']) if video_dict['end'] is not None else cap_max 
+
+    n = video_dict['num_animals']
+    n_frames = cap_max - video_dict['start'] + 1
     
     #Initialize vector to store motion values in
-    X = np.zeros(cap_max - video_dict['start'])
-    Y = np.zeros(cap_max - video_dict['start'])
-    D = np.zeros(cap_max - video_dict['start'])
+    X = np.zeros((n, n_frames))
+    Y = np.zeros((n, n_frames))
+    D = np.zeros((n, n_frames))
+
+    print(f"Reading {n_frames} frames\n")
 
     #Loop through frames to detect frame by frame differences
     time.sleep(.2) #allow printing
-    for f in tqdm(range(len(D))):
+
+    for f in tqdm(range(n_frames)):
         
         if f>0: 
-            yprior = np.around(Y[f-1]).astype(int)
-            xprior = np.around(X[f-1]).astype(int)
-            ret,dif,com,frame = Locate(cap,tracking_params,video_dict,prior=[yprior,xprior], clip=CLIP_BRIGHT_OBJECTS)
+            yprior = np.around(Y[:, f-1]).astype(int)
+            xprior = np.around(X[:, f-1]).astype(int)
+            ret,dif,com, _ = Locate(cap,tracking_params,video_dict,prior=[yprior,xprior], clip=CLIP_BRIGHT_OBJECTS, crop_num=-1)
         else:
-            ret,dif,com,frame = Locate(cap,tracking_params,video_dict, clip=CLIP_BRIGHT_OBJECTS)
-                                                
-        if ret == True:          
-            Y[f] = com[0]
-            X[f] = com[1]
-            if f>0:
-                D[f] = np.sqrt((Y[f]-Y[f-1])**2 + (X[f]-X[f-1])**2)
-        else:
+            ret,dif,com, _ = Locate(cap,tracking_params,video_dict, clip=CLIP_BRIGHT_OBJECTS, crop_num=-1)
+
+        if not ret:
             #if no frame is detected
             f = f-1
-            X = X[:f] #Amend length of X vector
-            Y = Y[:f] #Amend length of Y vector
-            D = D[:f] #Amend length of D vector
+            X = X[:, :f] #Amend length of X vector
+            Y = Y[:, :f] #Amend length of Y vector
+            D = D[:, :f] #Amend length of D vector
             break
+        
+        for x in range(n):
+            # Use center of mass coordinates. Currently we ignore dif
+            Y[x, f] = com[x][0]
+            X[x, f] = com[x][1]
+            if f>0:
+                D[x, f] = np.sqrt((Y[x, f]-Y[x, f-1])**2 + (X[x, f]-X[x, f-1])**2)
 
     #release video
     cap.release()
     time.sleep(.2) #allow printing
-    print('total frames processed: {f}\n'.format(f=len(D)))
+
+    n_frames_processed = D.shape[1]
+    
+    print('total frames processed: {f}\n'.format(f=n_frames_processed))
 
     #create pandas dataframe
     df = pd.DataFrame(
     {'File' : video_dict['file'],
-     'Location_Thresh': np.ones(len(D))*tracking_params['loc_thresh'],
+     'Location_Thresh': np.ones(n_frames_processed)*tracking_params['loc_thresh'],
      'Use_Window': str(tracking_params['use_window']),
-     'Window_Weight': np.ones(len(D))*tracking_params['window_weight'],
-     'Window_Size': np.ones(len(D))*tracking_params['window_size'],
-     'Start_Frame': np.ones(len(D))*video_dict['start'],
-     'Frame': np.arange(len(D)),
-     'X': X,
-     'Y': Y,
-     'Distance_px': D
+     'Window_Weight': np.ones(n_frames_processed)*tracking_params['window_weight'],
+     'Window_Size': np.ones(n_frames_processed)*tracking_params['window_size'],
+     'Start_Frame': np.ones(n_frames_processed)*video_dict['start'],
+     'Frame': np.arange(n_frames_processed)
     })
+
+    for x in range(n):
+        xname = 'X' + str(x)
+        yname = 'Y' + str(x)
+
+#        breakpoint()
+        
+        df[xname] = X[x,:]
+        df[yname] = Y[x,:]
+        
+    for x in range(n):
+        Dname = 'Dist_px' + str(x)
+        df[Dname] = D[x,:]
 
     #add region of interest info
     df = ROI_Location(video_dict, df) 
@@ -830,7 +977,7 @@ def TrackLocation(video_dict,tracking_params):
             df['ROI_transition'] = ROI_transitions(df['ROI_location'])
     
     #update scale, if known
-    df = ScaleDistance(video_dict, df=df, column='Distance_px')
+    df = ScaleDistance(video_dict, df=df, column='Dist_px0')
        
     return df
 
@@ -840,7 +987,7 @@ def TrackLocation(video_dict,tracking_params):
 
 ########################################################################################
 
-def LocationThresh_View(video_dict,tracking_params,examples=4):
+def LocationThresh_View(video_dict,tracking_params,examples=4, crop_num=0):
     """ 
     -------------------------------------------------------------------------------------
     
@@ -955,7 +1102,10 @@ def LocationThresh_View(video_dict,tracking_params,examples=4):
         while ret is False:     
             frm=np.random.randint(video_dict['start'],cap_max) #select random frame
             cap.set(cv2.CAP_PROP_POS_FRAMES,frm) #sets frame to be next to be grabbed
-            ret,dif,com,frame = Locate(cap, tracking_params, video_dict, clip=example > 0) 
+            ret,dif,com,frame = Locate(cap, tracking_params, video_dict, clip=example > 0, crop_num=crop_num)
+
+        # Since we only tracked one animal, convert list to a single item
+        dif = dif[0]
 
         #plot original frame
         image_orig = hv.Image((np.arange(frame.shape[1]), np.arange(frame.shape[0]), frame))
@@ -964,8 +1114,8 @@ def LocationThresh_View(video_dict,tracking_params,examples=4):
             #height=int(video_dict['reference'].shape[0]*video_dict['stretch']['height']),
             invert_yaxis=True,cmap='gray',toolbar='below',
             data_aspect=1,  # make sure pixels are square
-            title="Frame: " + str(frm))
-        orig_overlay = image_orig * hv.Points(([com[1]],[com[0]])).opts(
+            title=video_dict['crop_names'][crop_num] + ": " + str(frm))
+        orig_overlay = image_orig * hv.Points(([com[0][1]],[com[0][0]])).opts(
             color='red',size=20,marker='+',line_width=3) 
         
         #plot heatmap
@@ -979,8 +1129,8 @@ def LocationThresh_View(video_dict,tracking_params,examples=4):
             #height=int(dif.shape[0]*video_dict['stretch']['height']),
             invert_yaxis=True,cmap='jet',toolbar='below',
             data_aspect=1,
-            title="Frame: " + str(frm - video_dict['start']))
-        heat_overlay = image_heat * hv.Points(([com[1]],[com[0]])).opts(
+            title=video_dict['crop_names'][crop_num] + ": " + str(frm - video_dict['start']))
+        heat_overlay = image_heat * hv.Points(([com[0][1]],[com[0][0]])).opts(
             color='red',size=20,marker='+',line_width=3) 
         
         images.extend([orig_overlay,heat_overlay])
@@ -995,7 +1145,7 @@ def LocationThresh_View(video_dict,tracking_params,examples=4):
 
 ########################################################################################    
     
-def ROI_plot(video_dict):
+def ROI_plot(video_dict, roi_method="Poly"):
     """ 
     -------------------------------------------------------------------------------------
     
@@ -1082,11 +1232,6 @@ def ROI_plot(video_dict):
         invert_yaxis=True,cmap='gray', colorbar=True,toolbar='below',
         title="No Regions to Draw" if nobjects == 0 else "Draw Regions: "+', '.join(video_dict['region_names']))
 
-    #Create polygon element on which to draw and connect via stream to PolyDraw drawing tool
-    poly = hv.Polygons([])
-    poly_stream = streams.PolyDraw(source=poly, drag=True, num_objects=nobjects, show_vertices=True)
-    poly.opts(fill_alpha=0.3, active_tools=['poly_draw'])
-
     def centers(data):
         try:
             x_ls, y_ls = data['xs'], data['ys']
@@ -1096,10 +1241,32 @@ def ROI_plot(video_dict):
         ys = [np.mean(y) for y in y_ls]
         rois = video_dict['region_names'][:len(xs)]
         return hv.Labels((xs, ys, rois))
+
+    def centers_box(data):
+        try:
+            x_ls = [(a + b)/2 for a, b in zip(data['x0'], data['x1'])]
+            y_ls = [(a + b)/2 for a, b in zip(data['y0'], data['y1'])]
+        except Exception as e:
+            print(f'error: {e}')
+            x_ls, y_ls = [], []
+        rois = video_dict['region_names'][:len(x_ls)]
+        return hv.Labels((x_ls, y_ls, rois))
     
+
     if nobjects > 0:
-        dmap = hv.DynamicMap(centers, streams=[poly_stream])
-        return (image * poly * dmap), poly_stream
+        #Create polygon element on which to draw and connect via stream to PolyDraw drawing tool
+        poly = hv.Polygons([])
+        if roi_method == "Poly":
+            poly_stream = streams.PolyDraw(source=poly, drag=True, num_objects=nobjects, show_vertices=True)
+            poly.opts(fill_alpha=0.3, active_tools=['poly_draw'])
+            dmap = hv.DynamicMap(centers, streams=[poly_stream])
+            return (image * poly * dmap), poly_stream
+        elif roi_method == "Box":
+            poly_stream = streams.BoxEdit(source=poly,num_objects=3)
+            poly.opts(alpha=.5, active_tools=['box_edit'])
+            dmap = hv.DynamicMap(centers_box, streams=[poly_stream])
+            return (image * poly * dmap), poly_stream
+
     else:
         return (image),None
     
@@ -1200,15 +1367,29 @@ def ROI_Location(video_dict, df):
 
     num_polygons = len(rsd['xs'])
 
-    for idx_poly in range(num_polygons):
-        # Loop through each polygon. Note that the number of polygons might be less than the number of region_names
-        # if the user didn't bother to define all regions.
-        x = np.array(rsd['xs'][idx_poly]) #x coordinates
-        y = np.array(rsd['ys'][idx_poly]) #y coordinates
-        xy = np.column_stack((x,y)).astype('uint64') #xy coordinate pairs
-        mask = np.zeros(video_dict['reference'].shape) # create empty mask
-        cv2.fillPoly(mask, pts =[xy], color=255) #fill polygon  
-        ROI_mask_dict[region_name_list[idx_poly]] = mask==255 # convert to boolean, and save to ROI_mask_dict
+    IS_BOX = 'x0' in video_dict['roi_stream'].data   # Test whether we defined ROIs using box instead of polygon
+
+    if IS_BOX:
+        for idx_poly in range(num_polygons):
+            # Loop through each polygon. Note that the number of polygons might be less than the number of region_names
+            # if the user didn't bother to define all regions.
+            x0 = rsd['x0'][idx_poly]
+            y0 = rsd['y0'][idx_poly]
+            x1 = rsd['x1'][idx_poly]
+            y1 = rsd['y1'][idx_poly]
+            mask = np.zeros(video_dict['reference'].shape) # create empty mask
+            cv2.rectangle(mask, (x0, y0), (x1, y1), color=255, thickness=-1) #fill rectangle
+            ROI_mask_dict[region_name_list[idx_poly]] = mask==255 # convert to boolean, and save to ROI_mask_dict
+    else:
+        for idx_poly in range(num_polygons):
+            # Loop through each polygon. Note that the number of polygons might be less than the number of region_names
+            # if the user didn't bother to define all regions.
+            x = np.array(rsd['xs'][idx_poly]) #x coordinates
+            y = np.array(rsd['ys'][idx_poly]) #y coordinates
+            xy = np.column_stack((x,y)).astype('uint64') #xy coordinate pairs
+            mask = np.zeros(video_dict['reference'].shape) # create empty mask
+            cv2.fillPoly(mask, pts =[xy], color=255) #fill polygon  
+            ROI_mask_dict[region_name_list[idx_poly]] = mask==255 # convert to boolean, and save to ROI_mask_dict
 
     if num_polygons < len(region_name_list):
         # Show warning
@@ -1713,7 +1894,7 @@ def GetFileBase(video_dict, full_path=True):
 
 ########################################################################################        
 
-def PlayVideo(video_dict,display_dict,location, file_suffix=""):  
+def PlayVideo(video_dict,display_dict,location):
     """ 
     -------------------------------------------------------------------------------------
     
@@ -1808,11 +1989,12 @@ def PlayVideo(video_dict,display_dict,location, file_suffix=""):
                     int(frame.shape[0]*video_dict['dsmpl'])
                 ),
                 cv2.INTER_NEAREST)
-        frame = cropframe(frame, video_dict['crop'])
+            
+#        frame = cropframe(frame, video_dict['crop'])
         height, width = int(frame.shape[0]), int(frame.shape[1])
 
-        output_file_base = GetFileBase(video_dict, full_path=False) + file_suffix + "_tracked.avi"
-        output_file_base2 = GetFileBase(video_dict, full_path=False) + file_suffix + "_tracked_fast.avi"
+        output_file_base = GetFileBase(video_dict, full_path=False) + "_tracked.avi"
+        output_file_base2 = GetFileBase(video_dict, full_path=False) + "_tracked_fast.avi"
         fps = video_dict['nominal_fps']
         fpath = os.path.join(os.path.normpath(video_dict['dpath']), output_file_base)
         fpath2 = os.path.join(os.path.normpath(video_dict['dpath']), output_file_base2)
@@ -1820,6 +2002,9 @@ def PlayVideo(video_dict,display_dict,location, file_suffix=""):
         if fps == 0:
             print(f'Warning: unable to determine original frame rate, substituting 30 fps.')
             fps = 30
+        elif fps < 5:
+            # For very low frame rates, impose a minimum of 5fps
+            fps = 5
         else:
             print(f'Writing video file, input frame rate {fps} fps: {fpath}')
             
@@ -1868,6 +2053,10 @@ def PlayVideo(video_dict,display_dict,location, file_suffix=""):
     percent_reported = 0
 
     USE_EXT_VIEWER = True
+
+    n = video_dict['num_animals']
+
+    height = None
     
     for f in range(param_start, param_stop):
         ret, frame = cap.read() #read frame
@@ -1885,12 +2074,25 @@ def PlayVideo(video_dict,display_dict,location, file_suffix=""):
                     int(frame.shape[0]*video_dict['dsmpl'])
                 ),
                 cv2.INTER_NEAREST)
-        frame = cropframe(frame, video_dict['crop'])
+#        frame = cropframe(frame, video_dict['crop'])
 
-        f2 = f - analysis_start   # Frame in analysis arrays        
+        if height is None:
+            height, width = int(frame.shape[0]), int(frame.shape[1])
 
-        markposition = (int(location['X'][f2]),int(location['Y'][f2]))
-        cv2.drawMarker(img=frame,position=markposition,color=255)
+        f2 = f - analysis_start   # Frame in analysis arrays
+
+        if f2 >= len(location['X0']):
+            # Reached end of location table
+            break
+        
+        for x in range(n):
+            x0 = video_dict['crop'].data['x0'][x] + location['X' + str(x)][f2]
+            y0 = video_dict['crop'].data['y1'][x] + location['Y' + str(x)][f2]
+            try:
+                markposition = (int(x0),int(y0))
+                cv2.drawMarker(img=frame,position=markposition,color=255)
+            except:
+                pass
 
         #Save video (if desired). 
         if display_dict['save_video']:
@@ -1900,7 +2102,7 @@ def PlayVideo(video_dict,display_dict,location, file_suffix=""):
             # Save every 15th frame to a second file
             writer2.write(frame)
 
-        if f % 1000 == 0:
+        if f % 200 == 0:
             # Display every nth frame
             percent_done = (f - param_start) * 100.0 / (param_stop - param_start)
             if USE_EXT_VIEWER:
@@ -1945,7 +2147,7 @@ def display_image(frame,fps,resize):
     
 ########################################################################################
 
-def showtrace(video_dict, location, color="red",alpha=.8,size=3):
+def showtrace(video_dict, location, color="red",alpha=.8,size=3, animal_num=0):
     """ 
     -------------------------------------------------------------------------------------
     
@@ -2033,15 +2235,15 @@ def showtrace(video_dict, location, color="red",alpha=.8,size=3):
             lst.append( [ (x[vert],y[vert]) for vert in range(len(x)) ] )
         poly = hv.Polygons(lst).opts(fill_alpha=0.1,line_dash='dashed')
         
-    image = hv.Image((np.arange(video_dict['reference'].shape[1]),
-                      np.arange(video_dict['reference'].shape[0]),
-                      video_dict['reference'])
+    image = hv.Image((np.arange(video_dict['reference'][animal_num].shape[1]),
+                      np.arange(video_dict['reference'][animal_num].shape[0]),
+                      video_dict['reference'][animal_num])
                     ).opts(#width=int(video_dict['reference'].shape[1]*video_dict['stretch']['width']),
                            #height=int(video_dict['reference'].shape[0]*video_dict['stretch']['height']),
                            invert_yaxis=True,cmap='gray',toolbar='below', data_aspect=1,
                            title="Motion Trace")
     
-    points = hv.Scatter(np.array([location['X'],location['Y']]).T).opts(color='red',alpha=alpha,size=size)
+    points = hv.Scatter(np.array([location['X' + str(animal_num)],location['Y' + str(animal_num)]]).T).opts(color='red',alpha=alpha,size=size)
     
     return (image*poly*points) if video_dict['roi_stream']!=None else (image*points)
 
@@ -2051,7 +2253,7 @@ def showtrace(video_dict, location, color="red",alpha=.8,size=3):
 
 ########################################################################################    
 
-def Heatmap (video_dict, location, sigma=None):
+def Heatmap (video_dict, location, sigma=None, animal_num=0):
     """ 
     -------------------------------------------------------------------------------------
     
@@ -2124,9 +2326,9 @@ def Heatmap (video_dict, location, sigma=None):
         stretch only affects display
 
     """    
-    heatmap = np.zeros(video_dict['reference'].shape)
+    heatmap = np.zeros(video_dict['reference'][animal_num].shape)
     for frame in range(len(location)):
-        Y,X = int(location.Y[frame]), int(location.X[frame])
+        Y,X = int(location['Y'  + str(animal_num)][frame]), int(location['X' + str(animal_num)][frame])
         heatmap[Y,X]+=1
     
     sigma = np.mean(heatmap.shape)*.05 if sigma == None else sigma
