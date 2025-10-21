@@ -38,6 +38,8 @@ import PIL.Image
 import time
 import warnings
 import functools as fct
+
+import bokeh
 from scipy import ndimage
 from tqdm import tqdm
 import holoviews as hv
@@ -296,6 +298,14 @@ def LoadAndCrop(video_dict,cropmethod=None,fstfile=False,accept_p_frames=False):
 
     #Make first image reference frame on which cropping can be performed
     image = hv.Image((np.arange(frame.shape[1]), np.arange(frame.shape[0]), frame))
+
+    print(f"Using bokeh version {bokeh.__version__}")
+    
+    if bokeh.__version__ < "3.4":
+        graph_title = "Frame #1. Select region with mouse double-click + drag"
+    else:
+        graph_title = "Frame #1. Select region using SHIFT+click"
+        
     image.opts(
         width=int(frame.shape[1]*video_dict['stretch']['width']),
         height=int(frame.shape[0]*video_dict['stretch']['height']),
@@ -303,7 +313,7 @@ def LoadAndCrop(video_dict,cropmethod=None,fstfile=False,accept_p_frames=False):
         cmap='gray',
         colorbar=True,
         toolbar='below',
-        title="First Frame.  Crop if Desired"
+        title=graph_title
     )
     
     def centers_box(data):
@@ -317,7 +327,7 @@ def LoadAndCrop(video_dict,cropmethod=None,fstfile=False,accept_p_frames=False):
             print(data)
             x_ls, y_ls = [], []
         rois = video_dict['crop_names'][:len(x_ls)]
-        return hv.Labels((x_ls, y_ls, rois))
+        return hv.Labels((x_ls, y_ls, rois)).opts(text_color='black', background_fill_color='white')  # , background_fill_alpha=0)
     
     #Create polygon element on which to draw and connect via stream to poly drawing tool
     if cropmethod==None:
