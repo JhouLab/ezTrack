@@ -302,9 +302,9 @@ def LoadAndCrop(video_dict,cropmethod=None,fstfile=False,accept_p_frames=False):
     print(f"Using bokeh version {bokeh.__version__}")
     
     if bokeh.__version__ < "3.4":
-        graph_title = "Frame #1. Select region with mouse double-click + drag"
+        graph_title = "Frame #1. Select region with mouse double-click, then drag"
     else:
-        graph_title = "Frame #1. Select region using SHIFT+click"
+        graph_title = "Frame #1. Select region using SHIFT+click+drag to start rectangle"
         
     image.opts(
         width=int(frame.shape[1]*video_dict['stretch']['width']),
