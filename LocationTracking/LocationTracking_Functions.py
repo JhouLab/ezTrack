@@ -508,7 +508,6 @@ def Reference(video_dict,num_frames=100,
     if frames is None:
         #frames = np.random.randint(video_dict['start'],cap_max,num_frames)
         frames = np.linspace(start=video_dict['start'], stop=cap_max - 2, num=num_frames)
-        breakpoint()
     else:
         num_frames = len(frames) #make sure num_frames equals length of passed list
 
