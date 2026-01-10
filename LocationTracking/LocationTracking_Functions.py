@@ -111,7 +111,7 @@ def CountFrames(video_dict):
 
     # If we don't trust the metadata, we can count actual frames. This will take a while, and usually is not necessary.
     frame_count = 0
-    print('Frame count: ', end="")
+    print('Counting frames, please wait ... ', end="")
     while ret:
         frame_count += 1
         if frame_count % 2500 == 0:
@@ -768,8 +768,9 @@ def Locate(cap,tracking_params,video_dict,prior=None, clip=False, crop_num=0):
             if krn_violation:
                 print("WARNING: wire_krn too large. Reverting to rmv_wire=False for frame {x}".format(
                     x= int(cap.get(cv2.CAP_PROP_POS_FRAMES)-1-video_dict['start'])))
-            
-        com=ndimage.measurements.center_of_mass(dif)
+
+        com=ndimage.center_of_mass(dif)        
+#        com=ndimage.measurements.center_of_mass(dif)
         return dif, com, frame
 
     if crop_num < 0:
