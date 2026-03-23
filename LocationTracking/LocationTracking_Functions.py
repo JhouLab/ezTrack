@@ -54,6 +54,13 @@ warnings.filterwarnings("ignore")
 from scipy.ndimage import minimum_filter
 
 
+from bokeh.core.validation import silence
+from bokeh.core.validation.warnings import FIXED_SIZING_MODE
+
+# Silence warnings about 'fixed' sizing mode needing width, height
+silence(FIXED_SIZING_MODE, True)
+
+
 CLIP_BRIGHT_OBJECTS = True
 
 ########################################################################################    
