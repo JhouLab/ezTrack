@@ -2010,8 +2010,8 @@ def PlayVideo(video_dict,display_dict,location):
 #        frame = cropframe(frame, video_dict['crop'])
         height, width = int(frame.shape[0]), int(frame.shape[1])
 
-        output_file_base = GetFileBase(video_dict, full_path=False) + "_tracked.avi"
-        output_file_base2 = GetFileBase(video_dict, full_path=False) + "_tracked_fast.avi"
+        output_file_base = GetFileBase(video_dict, full_path=False) + "_" + str(video_dict['dsmpl']) + "_tracked.avi"
+        output_file_base2 = GetFileBase(video_dict, full_path=False) + "_" + str(video_dict['dsmpl']) + "_tracked_fast.avi"
         fps = video_dict['nominal_fps']
         fpath = os.path.join(os.path.normpath(video_dict['dpath']), output_file_base)
         fpath2 = os.path.join(os.path.normpath(video_dict['dpath']), output_file_base2)
