@@ -3,6 +3,7 @@ print("Importing libraries...")
 import os
 import sys
 import holoviews as hv
+from holoviews import streams
 import numpy as np
 import LocationTracking_Functions_loop as lt
 from bokeh.io import output_notebook, show
@@ -141,11 +142,33 @@ for f in files_recursive:
 
     print(f)
 
-#    continue
-
     img_crp, video_dict = lt.LoadAndCrop(video_dict, cropmethod='Box')
-#    display(img_crp)
 
+    crop_dict = {}
+    idx = 0
+    # Hard-coded crop rectangle corresponding to bottom middle of window
+    # left-right edges 38 to 276
+    # bottom to top edges 238 to 39
+    crop_dict['x0'] = [38]   # Left edge
+    crop_dict['x1'] = [276]  # Right edge
+    crop_dict['y0'] = [238]  # Bottom edge (239 is max)
+    crop_dict['y1'] = [39]   # Top edge
+
+    initial_data = [
+        [(38, 238), (38, 39), (276, 39), (276, 238)]  # Square (x0, y0) (x0, y1) (x1, y1) (x1, y0)
+    ]
+
+    # 2. Create the Polygons element with initial data
+    box = hv.Polygons(initial_data)
+    box_stream = streams.BoxEdit(source=box, num_objects=video_dict['num_animals'])
+    box_stream.data['x0'] = [38]   # Left edge
+    box_stream.data['x1'] = [276]  # Right edge
+    box_stream.data['y0'] = [238]  # Bottom edge (239 is max)
+    box_stream.data['y1'] = [39]
+
+    box_stream.data = crop_dict
+    video_dict['crop'] = box_stream
+    
     video_dict['reference'] = []
 
     for idx in range(video_dict['num_animals']):
