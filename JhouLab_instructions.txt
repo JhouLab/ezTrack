@@ -1,4 +1,12 @@
 
+How to install from base python (no anaconda needed)
+
+From command line:
+
+pip install numpy pandas selenium bokeh opencv-python matplotlib scipy
+pip install webdriver-manager
+pip install holoviews
+
 FIRST TIME INSTRUCTIONS:
 
 Install miniconda, then open conda prompt (not regular cmd.exe), and enter:

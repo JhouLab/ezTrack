@@ -28,7 +28,7 @@ ScaleDistance
 
 import os
 import sys
-import cv2   # Install using pip install opencv-python   This will give you version 4.13 as of March 2026
+import cv2   # Need pip install opencv-python   This will give you version 4.13 as of March 2026
 import fnmatch
 import numpy as np
 import matplotlib as mpl
@@ -48,7 +48,11 @@ from holoviews import streams
 from holoviews.streams import Stream, param
 from io import BytesIO
 from IPython.display import clear_output, Image, display
-hv.notebook_extension('bokeh')
+
+# hv.notebook_extension('bokeh')
+# bokeh_obj = hv.renderer('matplotlib')
+hv.renderer('matplotlib')
+
 warnings.filterwarnings("ignore")
 
 from scipy.ndimage import minimum_filter
@@ -314,42 +318,21 @@ def LoadAndCrop(video_dict,cropmethod=None,fstfile=False,accept_p_frames=False):
         graph_title = "Frame #1. Select region using SHIFT+click+drag to start rectangle (newer version of bokeh)"
         
     image.opts(
-        width=int(frame.shape[1]*video_dict['stretch']['width']),
-        height=int(frame.shape[0]*video_dict['stretch']['height']),
+        #width=int(frame.shape[1]*video_dict['stretch']['width']),
+        #height=int(frame.shape[0]*video_dict['stretch']['height']),
+        fig_size=300, aspect=1.2,    # For matplotlib
         invert_yaxis=True,
         cmap='gray',
         colorbar=True,
-        toolbar='below',
+        # toolbar='below',
         title=graph_title
     )
-    
-    def centers_box(data):
-        if data is None:
-            return hv.Labels(([], [], []))
-        try:
-            x_ls = [(a + b)/2 for a, b in zip(data['x0'], data['x1'])]
-            y_ls = [(a + b)/2 for a, b in zip(data['y0'], data['y1'])]
-        except Exception as e:
-            print(f'centers_box error: {e}')
-            print(data)
-            x_ls, y_ls = [], []
-        rois = video_dict['crop_names'][:len(x_ls)]
-        return hv.Labels((x_ls, y_ls, rois)).opts(text_color='black', background_fill_color='white')  # , background_fill_alpha=0)
-    
+
     #Create polygon element on which to draw and connect via stream to poly drawing tool
-    if cropmethod==None:
-        image.opts(title="First Frame")
-        video_dict['crop'] = None
-        return image, video_dict
-    
-    if cropmethod=='Box':         
-        box = hv.Polygons([])
-        box_stream = streams.BoxEdit(source=box,num_objects=len(video_dict['crop_names']))
-        box.opts(alpha=.5, active_tools=['box_edit'])
-        dmap = hv.DynamicMap(centers_box, streams=[box_stream])
-        video_dict['crop'] = box_stream
-        return (image*box*dmap), video_dict
-    
+    image.opts(title="First Frame")
+    video_dict['crop'] = None
+    return image, video_dict
+
     
 
 ########################################################################################
@@ -560,7 +543,7 @@ def Reference(video_dict,num_frames=100,
                                        invert_yaxis=True,
                                        cmap='gray', clim=(0, 255),  # clim forces full 0-255 range
                                        colorbar=True, data_aspect=1,
-                                       toolbar='below',
+                                       # toolbar='below',
                                        title="Ref: " + video_dict['crop_names'][crop_num])
 
     _om = np.median(reference)
@@ -1129,11 +1112,17 @@ def LocationThresh_View(video_dict,tracking_params,examples=4, crop_num=0):
         image_orig.opts(
             #width=int(video_dict['reference'].shape[1]*video_dict['stretch']['width']),
             #height=int(video_dict['reference'].shape[0]*video_dict['stretch']['height']),
-            invert_yaxis=True,cmap='gray',toolbar='below',
+            invert_yaxis=True,cmap='gray',
+            # toolbar='below',
             data_aspect=1,  # make sure pixels are square
             title=video_dict['crop_names'][crop_num] + ": " + str(frm))
         orig_overlay = image_orig * hv.Points(([com[0][1]],[com[0][0]])).opts(
-            color='red',size=20,marker='+',line_width=3) 
+            color='red',
+#            size=20,  # Bokeh
+            s=400,  # Matplotlib
+            marker='+',
+#            line_width=3, # Bokeh
+        linewidth=3)  # MPL
         
         #plot heatmap
         dif = dif*(255//dif.max())
@@ -1144,11 +1133,18 @@ def LocationThresh_View(video_dict,tracking_params,examples=4, crop_num=0):
         image_heat.opts(
             #width=int(dif.shape[1]*video_dict['stretch']['width']),
             #height=int(dif.shape[0]*video_dict['stretch']['height']),
-            invert_yaxis=True,cmap='jet',toolbar='below',
+            invert_yaxis=True,cmap='jet',
+            # toolbar='below',
             data_aspect=1,
             title=video_dict['crop_names'][crop_num] + ": " + str(frm - video_dict['start']))
         heat_overlay = image_heat * hv.Points(([com[0][1]],[com[0][0]])).opts(
-            color='red',size=20,marker='+',line_width=3) 
+            color='red',
+#            size=20,  # Bokeh
+            s=400,    # MPL
+            marker='+',
+#            line_width=3,  # Bokeh
+        linewidth=3)   # MPL
+
         
         images.extend([orig_overlay,heat_overlay])
     
@@ -1246,7 +1242,8 @@ def ROI_plot(video_dict, roi_method="Poly"):
     image.opts(
         width=int(video_dict['reference'].shape[1]*video_dict['stretch']['width']),
         height=int(video_dict['reference'].shape[0]*video_dict['stretch']['height']),
-        invert_yaxis=True,cmap='gray', colorbar=True,toolbar='below',
+        invert_yaxis=True,cmap='gray', colorbar=True,
+        # toolbar='below',
         title="No Regions to Draw" if nobjects == 0 else "Draw Regions: "+', '.join(video_dict['region_names']))
 
     def centers(data):
@@ -2103,8 +2100,15 @@ def PlayVideo(video_dict,display_dict,location):
             break
         
         for x in range(n):
-            x0 = video_dict['crop'].data['x0'][x] + location['X' + str(x)][f2]
-            y0 = video_dict['crop'].data['y1'][x] + location['Y' + str(x)][f2]
+            cropobj = video_dict['crop']
+            if cropobj is None:
+                crop_x = 0
+                crop_y = 0
+            else:
+                crop_x = video_dict['crop'].data['x0'][x]
+                crop_y = video_dict['crop'].data['y1'][x]
+            x0 = crop_x + location['X' + str(x)][f2]
+            y0 = crop_y + location['Y' + str(x)][f2]
             try:
                 markposition = (int(x0),int(y0))
                 cv2.drawMarker(img=frame,position=markposition,color=255)
@@ -2257,10 +2261,15 @@ def showtrace(video_dict, location, color="red",alpha=.8,size=3, animal_num=0):
                       video_dict['reference'][animal_num])
                     ).opts(#width=int(video_dict['reference'].shape[1]*video_dict['stretch']['width']),
                            #height=int(video_dict['reference'].shape[0]*video_dict['stretch']['height']),
-                           invert_yaxis=True,cmap='gray',toolbar='below', data_aspect=1,
+                           invert_yaxis=True,cmap='gray',
+                        # toolbar='below',
+                        data_aspect=1,
                            title="Motion Trace")
     
-    points = hv.Scatter(np.array([location['X' + str(animal_num)],location['Y' + str(animal_num)]]).T).opts(color='red',alpha=alpha,size=size)
+    points = hv.Scatter(np.array([location['X' + str(animal_num)],location['Y' + str(animal_num)]]).T).opts(
+        color='red',alpha=alpha,
+        s=size*size)  # MPL
+#        size=size)  # Bokeh
     
     return (image*poly*points) if video_dict['roi_stream']!=None else (image*points)
 
@@ -2357,7 +2366,9 @@ def Heatmap (video_dict, location, sigma=None, animal_num=0):
 #           height=int(heatmap.shape[0]*video_dict['stretch']['height']),
            invert_yaxis=True, cmap='jet', alpha=1,
            data_aspect=1, # aspect=1,
-           colorbar=False, toolbar='below', title="Heatmap")
+           colorbar=False,
+        # toolbar='below',
+           title="Heatmap")
     
     return map_i
 
@@ -2452,7 +2463,7 @@ def DistanceTool(video_dict):
                height=int(video_dict['reference'].shape[0]*video_dict['stretch']['height']),
               invert_yaxis=True,cmap='gray',
               colorbar=True,
-               toolbar='below',
+              # toolbar='below',
               title="Select Points")
 
     #Create Point instance on which to draw and connect via stream to pointDraw drawing tool 
@@ -2736,7 +2747,7 @@ def Mask_select(video_dict, fstfile=False):
                height=int(f0.shape[0]*video_dict['stretch']['height']),
               invert_yaxis=True,cmap='gray',
               colorbar=True,
-               toolbar='below',
+              # toolbar='below',
               title="Draw Regions to be Exluded")
 
     #Create polygon element on which to draw and connect via stream to PolyDraw drawing tool
