@@ -2345,9 +2345,12 @@ def Heatmap (video_dict, location, sigma=None, animal_num=0):
     """    
     heatmap = np.zeros(video_dict['reference'][animal_num].shape)
     for frame in range(len(location)):
-        Y,X = int(location['Y'  + str(animal_num)][frame]), int(location['X' + str(animal_num)][frame])
-        heatmap[Y,X]+=1
-    
+        try:
+            Y,X = int(location['Y'  + str(animal_num)][frame]), int(location['X' + str(animal_num)][frame])
+            heatmap[Y, X] += 1
+        except ValueError:
+            print(f'Frame {frame} location not determined')
+
     sigma = np.mean(heatmap.shape)*.05 if sigma == None else sigma
     heatmap = cv2.GaussianBlur(heatmap,(0,0),sigma)
     heatmap = (heatmap / heatmap.max())*255
