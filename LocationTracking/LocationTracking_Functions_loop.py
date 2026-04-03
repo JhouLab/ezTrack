@@ -20,14 +20,11 @@ ScaleDistance
 
 """
 
-
-
-
-
 ########################################################################################
 
 import os
 import sys
+print('    Importing cv2...')
 import cv2   # Need pip install opencv-python   This will give you version 4.13 as of March 2026
 import fnmatch
 import numpy as np
@@ -51,13 +48,15 @@ from IPython.display import clear_output, Image, display
 
 # hv.notebook_extension('bokeh')
 # bokeh_obj = hv.renderer('matplotlib')
+print('    Setting renderer = matplotlib...')
 hv.renderer('matplotlib')
 
 warnings.filterwarnings("ignore")
 
+print('    Importing scipy...')
 from scipy.ndimage import minimum_filter
 
-
+print('    Importing bokeh.core.validation...')
 from bokeh.core.validation import silence
 from bokeh.core.validation.warnings import FIXED_SIZING_MODE
 
@@ -68,7 +67,6 @@ silence(FIXED_SIZING_MODE, True)
 CLIP_BRIGHT_OBJECTS = True
 
 ########################################################################################    
-
 
 def CountFrames(video_dict):
     """ 
@@ -502,13 +500,15 @@ def Reference(video_dict,num_frames=100,
         num_frames = len(frames) #make sure num_frames equals length of passed list
 
     collection = np.zeros((num_frames,h,w))  
-    print(f"Using frames: ", end="")
+    print(f"Building reference frame from frames:", end="")
     for (idx,framenum) in enumerate(frames):    
         grabbed = False
         while grabbed == False: 
             cap.set(cv2.CAP_PROP_POS_FRAMES, framenum)
             ret, frame = cap.read()
-            if ret == True:
+            if ret:
+                if idx % 10 == 0:
+                    print('\n    ', end="")
                 print(f"{int(framenum)}, ", end="")
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 if (video_dict['dsmpl'] < 1):
@@ -526,7 +526,7 @@ def Reference(video_dict,num_frames=100,
                 )
                 collection[idx,:,:]=gray
                 grabbed = True
-            elif ret == False:
+            else:
                 print(f'\nFailed to grab frame {framenum}, will reset to ', end="")
                 framenum = np.random.randint(video_dict['start'],cap_max,1)[0]
                 print(f'{framenum} to try again')
@@ -2025,7 +2025,7 @@ def PlayVideo(video_dict,display_dict,location):
         # fourcc = cv2.VideoWriter_fourcc(*'FFV1')   # Lossless. Not compatible with ImageJ, but readable by most other programs. Not very space-efficient
         # fourcc = cv2.VideoWriter_fourcc(*'jpeg')   # only writes up to 20 fps, though video read can be 30.
         # fourcc = cv2.VideoWriter_fourcc(*'FMP4')   # fragmented MP4. Uses H264 under the hood.
-        fourcc = cv2.VideoWriter_fourcc(*'MP4V')     # H264. 15x more efficient than FFV1. About 2kB per frame.
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')     # H264. 15x more efficient than FFV1. About 2kB per frame. Not compatible with codec id 12
         writer = cv2.VideoWriter(fpath,
                                  fourcc, fps,
                                  (width, height),
