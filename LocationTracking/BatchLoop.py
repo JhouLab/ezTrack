@@ -81,7 +81,7 @@ root = tk.Tk()
 root.withdraw()
 root.wm_attributes('-topmost', True)
 
-print('Please select AVI file from dialog box. Note: dialog might be behind the Python window, or on another screen.')
+print('\nPlease select folder from dialog box. Note that it might be behind the Python window, or on another screen.')
 
 relative_paths = ["behavior_videos", "behavior_videos_copy"]
 
@@ -91,22 +91,52 @@ for x in relative_paths:
     if Path(tmp).is_dir():
         SrcDir = filedialog.askdirectory(
             parent=root,
-            initialdir = tmp)
+            initialdir=tmp)
         break
 root.destroy()
 if SrcDir == '':
     print('No folder selected')
     sys.exit(1)
-else:
-    print(f'You selected folder "{SrcDir}"')
+
+DOWNSAMPLE_FACTOR = 0.5
 
 
+def has_analysis(filepath):
+    filepath_without_ext = Path(filepath).with_suffix("")
+    out_path_old = Path(f"{filepath_without_ext}_{str(DOWNSAMPLE_FACTOR)}_Location.csv")
+    out_path = Path(f"{filepath_without_ext}_Location.csv")
+    return out_path_old.is_file() or out_path.is_file()
+
+
+print(f'You selected folder "{SrcDir}"\nFiles to analyze are:')
 files_recursive = list(Path(SrcDir).rglob('*.avi'))
 
-for f in files_recursive:
+# Remove some files based on heuristics
+files_recursive = [x for x in files_recursive if "exclude" not in str(x)]
+files_recursive = [x for x in files_recursive if "tracked" not in str(x)]
+files_recursive = [x for x in files_recursive if not has_analysis(x)]
+
+for idx, f in enumerate(files_recursive):
+    print(f"{idx+1}: {f}")
+
+import tkinter as tk
+from tkinter import messagebox
+
+# Standard setup to hide the main background window
+root = tk.Tk()
+root.withdraw()
+result = messagebox.askokcancel("", "Please check file list in console, and press OK to continue (note that files already analyzed are excluded from thie list)")
+root.destroy()
+
+if not result:
+    print("Cancelled.")
+    sys.exit(1)
+
+
+for progress_count, f in enumerate(files_recursive):
 
     # Remove .avi suffix
-    tmp = Path(f).with_suffix("")
+    filepath_without_ext = Path(f).with_suffix("")
 
     if "tracked" in f.name:
         continue
@@ -125,11 +155,12 @@ for f in files_recursive:
     }
 
     # Generate output target filename with downsample ratio in filename
-    out_path = Path(f"{tmp}_{str(video_dict['dsmpl'])}_Location.csv")
+    out_path_old = Path(f"{filepath_without_ext}_{str(video_dict['dsmpl'])}_Location.csv")
+    out_path = Path(f"{filepath_without_ext}_Location.csv")
 
-    if out_path.is_file():
+    if has_analysis(f):
         # If previous analysis is present, then skip
-        print(f'{f}: Already have _Location.csv output. Will skip.')
+        print(f'File {progress_count+1} of {len(files_recursive)}, already have _Location.csv, skipping: {f}')
         continue
 
     animal_id_suffix = f.name[16:]
@@ -137,16 +168,21 @@ for f in files_recursive:
     try:
         animal_id_suffix = int(animal_id_suffix)
     except ValueError:
-        print(f'Unable to find animal ID for "{animal_id_suffix}", skipping.')
+        print(f'\n    Unable to find animal ID for "{animal_id_suffix}", skipping.')
         continue
 
     if animal_id_suffix < 50 or animal_id_suffix > 100:
         print(f'Animal ID {animal_id_suffix} is out of range 50-100. Skipping.')
         continue
 
-    print(f"\n{f}")
+    #
+    #   Passed all preliminary checks. Now starting real video analysis
+    #
 
-    img_crp, video_dict = lt.LoadAndCrop(video_dict, cropmethod='Box')
+    print(f'\n**** FILE {progress_count+1} OF {len(files_recursive)}: {f}')
+
+    start_time = time.time()
+    img_crp, video_dict = lt.LoadAndCrop(video_dict)
 
     # Hard-coded crop rectangle corresponding to bottom middle of window
     # left-right edges 38 to 276
@@ -156,14 +192,22 @@ for f in files_recursive:
     video_dict['crop'] = box_stream
     
     video_dict['reference'] = []
+    ref = None
 
+    # Calculate reference image for each animal
     for idx in range(video_dict['num_animals']):
-        fpath = lt.GetFileBase(video_dict) + "_" + video_dict['crop_names'][idx] + "_" + str(video_dict['dsmpl']) + "_reference.png"
+        fpath = lt.GetFileBase(video_dict) + "_" + video_dict['crop_names'][idx] + "_reference.png"
 
         ref, img_ref = lt.Reference(video_dict, num_frames=50, frames=None, crop_num=idx)
+        if ref is None:
+            break
         video_dict['reference'].append(ref)
-        print(f'Saving to: {fpath}')
+        print(f'Saving ref image to     : {fpath}')
         hv.save(img_ref, fpath)
+
+    if ref is None:
+        print('    Unable to grab enough frames to compute reference image, skipping.')
+        continue
 
     tracking_params = {
         'loc_thresh'    : 95,   # Default percentile, can be overridden later if needed (but usually isn't)
@@ -175,24 +219,24 @@ for f in files_recursive:
         'wire_krn'      : 5
     }
 
+    # Generate track examples for checking
     for idx in range(video_dict['num_animals']):
         img_exmpls = lt.LocationThresh_View(video_dict, tracking_params, examples=6, crop_num=idx)
         img_exmpls.cols(6)
 
-        fpath = lt.GetFileBase(video_dict) + "_" + video_dict['crop_names'][idx] + "_" + str(video_dict['dsmpl']) + "_track_examples.png"
-        print(f'Saving to file: {fpath}')
+        fpath = lt.GetFileBase(video_dict) + "_" + video_dict['crop_names'][idx] + "_track_examples.png"
+        print(f'Saving track examples to: {fpath}')
         hv.save(img_exmpls, fpath)
-        print('Done saving')
 
-
+    # Track animal
     location = lt.TrackLocation(video_dict, tracking_params)
-    out_path = os.path.splitext(video_dict['fpath'])[0] + "_" + str(video_dict['dsmpl']) + '_Location.csv'
+    out_path = os.path.splitext(video_dict['fpath'])[0] + '_Location.csv'
 
     # Print stats
     Dist = location['Dist_px0']
-    print(f"Mean distance per frame is: {Dist.mean()}, min is {Dist.min()}, max is {Dist.max()}")
+    print(f"Mean distance per frame is: {Dist.mean():0.5f}, min is {Dist.min():0.5f}, max is {Dist.max():0.5f}")
 
-    print(f"Saving to file: {out_path}")
+    print(f"Saving tracking data to file   : {out_path}")
     location.to_csv(out_path, index=False)
     location.head()
 
@@ -212,22 +256,21 @@ for f in files_recursive:
         plt_hmap = lt.Heatmap(video_dict, location, sigma=None)
         p = (plt_trks + plt_hmap + plt_dist).cols(3)
 
-        fpath = lt.GetFileBase(video_dict) + "_" + video_dict['crop_names'][x] + "_" + str(video_dict['dsmpl']) + "_movement.png"
-        print(f'Saving to file: {fpath}')
+        fpath = lt.GetFileBase(video_dict) + "_" + video_dict['crop_names'][x] + "_movement.png"
+        print(f'Saving to movement summary file: {fpath}')
         hv.save(p, fpath)
 
     display_dict = {
-        'start'      : 0,   # If < video_dict['start'], will be coerced to that value
+        'start'      : 0,       # If < video_dict['start'], will be coerced to that value
         'stop'       : None,    # If > video_dict['end'], will be coerced to that value
         'resize'     : None,
         'save_video' : True
     }
 
-    start_time = time.time()
-
+    # Generate tracked vide
     lt.PlayVideo(video_dict, display_dict, location)
 
     end_time = time.time()
     elapsed_time = end_time - start_time
-    print(f"Elapsed time: {elapsed_time:.2f} seconds")
+    print(f"Elapsed time: {elapsed_time:.2f} seconds\n")
 
