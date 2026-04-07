@@ -171,10 +171,6 @@ for progress_count, f in enumerate(files_recursive):
         print(f'\n    Unable to find animal ID for "{animal_id_suffix}", skipping.')
         continue
 
-    if animal_id_suffix < 50 or animal_id_suffix > 100:
-        print(f'Animal ID {animal_id_suffix} is out of range 50-100. Skipping.')
-        continue
-
     #
     #   Passed all preliminary checks. Now starting real video analysis
     #
