@@ -12,10 +12,11 @@ import time
 import socket
 print('Importing tkinter...')
 import tkinter as tk
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 from pathlib import Path
 from webdriver_manager.firefox import GeckoDriverManager      # Need to use pip install webdriver-manager to get this.
 from selenium.webdriver.firefox.service import Service as FirefoxService
+
 
 # Get the hostname of the local machine
 hostname = socket.gethostname()
@@ -41,6 +42,7 @@ else:
 service = FirefoxService(GeckoDriverManager().install())
 gecko_driver_path = service.path
 
+
 def find_firefox_windows():
     # Common default installation paths for Firefox on Windows
     # 64-bit Firefox on 64-bit Windows or 32-bit Firefox on 32-bit Windows
@@ -61,6 +63,7 @@ def find_firefox_windows():
             return str(path)
     print('Unable to find firefox installation. Some graph generating code may not work.')
     return None
+
 
 # Append firefox.exe to path
 current_path = os.environ.get('PATH')
@@ -108,19 +111,24 @@ def has_analysis(filepath):
     return out_path_old.is_file() or out_path.is_file()
 
 
-print(f'You selected folder "{SrcDir}"\nFiles to analyze are:')
 files_recursive = list(Path(SrcDir).rglob('*.avi'))
 
 # Remove some files based on heuristics
 files_recursive = [x for x in files_recursive if "exclude" not in str(x)]
 files_recursive = [x for x in files_recursive if "tracked" not in str(x)]
-files_recursive = [x for x in files_recursive if not has_analysis(x)]
 
+len1 = len(files_recursive)
+
+answer = messagebox.askyesno("", "Exclude files for which prior analysis is detected?")
+if answer:
+    # Remove files
+    files_recursive = [x for x in files_recursive if not has_analysis(x)]
+
+len2 = len(files_recursive)
+
+print(f'You selected folder "{SrcDir}.\nFolder contains {len1} avi files, of which {len2} need analysis:')
 for idx, f in enumerate(files_recursive):
     print(f"{idx+1}: {f}")
-
-import tkinter as tk
-from tkinter import messagebox
 
 # Standard setup to hide the main background window
 root = tk.Tk()
@@ -158,10 +166,11 @@ for progress_count, f in enumerate(files_recursive):
     out_path_old = Path(f"{filepath_without_ext}_{str(video_dict['dsmpl'])}_Location.csv")
     out_path = Path(f"{filepath_without_ext}_Location.csv")
 
-    if has_analysis(f):
+#    The following check is now done prior to entering loop
+#    if has_analysis(f):
         # If previous analysis is present, then skip
-        print(f'File {progress_count+1} of {len(files_recursive)}, already have _Location.csv, skipping: {f}')
-        continue
+#        print(f'File {progress_count+1} of {len(files_recursive)}, already have _Location.csv, skipping: {f}')
+#        continue
 
     animal_id_suffix = f.name[16:]
     animal_id_suffix = animal_id_suffix.split("_")[1]

@@ -2259,8 +2259,13 @@ def showtrace(video_dict, location, color="red",alpha=.8,size=3, animal_num=0):
                            #height=int(video_dict['reference'].shape[0]*video_dict['stretch']['height']),
                            invert_yaxis=True,cmap='gray',toolbar='below', data_aspect=1,
                            title="Motion Trace")
+
+    # Because coordinates are plotted onto reference image, we do NOT have to adjust for crop location, since both location array
+    # and reference image are already in cropped coordinate space
+    x0 = location['X' + str(animal_num)]
+    y0 = location['Y' + str(animal_num)]    
     
-    points = hv.Scatter(np.array([location['X' + str(animal_num)],location['Y' + str(animal_num)]]).T).opts(color='red',alpha=alpha,size=size)
+    points = hv.Scatter(np.array([x0, y0]).T).opts(color='red',alpha=alpha,size=size)
     
     return (image*poly*points) if video_dict['roi_stream']!=None else (image*points)
 
