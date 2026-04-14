@@ -106,9 +106,19 @@ DOWNSAMPLE_FACTOR = 0.5
 
 def has_analysis(filepath):
     filepath_without_ext = Path(filepath).with_suffix("")
-    out_path_old = Path(f"{filepath_without_ext}_{str(DOWNSAMPLE_FACTOR)}_Location.csv")
+    out_path_old1 = Path(f"{filepath_without_ext}_{str(DOWNSAMPLE_FACTOR)}_Location.csv")        # Newer file smostly look like this
+    out_path_old2 = Path(f"{filepath_without_ext}_{str(DOWNSAMPLE_FACTOR)}_LocationOutput.csv")  # Paul's files mostly look like this
     out_path = Path(f"{filepath_without_ext}_Location.csv")
-    return out_path_old.is_file() or out_path.is_file()
+    return out_path_old1.is_file() or out_path_old2.is_file() or out_path.is_file()
+
+
+def has_Pavlovian_file(filepath):
+    file_path = Path(filepath)
+    for f in Path(file_path.parent).iterdir():
+        if f.is_file() and ".plx" in f.name:
+            return True
+
+    return False
 
 
 files_recursive = list(Path(SrcDir).rglob('*.avi'))
@@ -116,6 +126,9 @@ files_recursive = list(Path(SrcDir).rglob('*.avi'))
 # Remove some files based on heuristics
 files_recursive = [x for x in files_recursive if "exclude" not in str(x)]
 files_recursive = [x for x in files_recursive if "tracked" not in str(x)]
+
+# Only include files for which there is a .plx file in that folder, for analyzing Paul's files
+files_recursive = [x for x in files_recursive if has_Pavlovian_file(x)]
 
 len1 = len(files_recursive)
 
@@ -126,6 +139,7 @@ if answer:
 
 len2 = len(files_recursive)
 
+files_recursive = sorted(files_recursive)
 print(f'You selected folder "{SrcDir}.\nFolder contains {len1} avi files, of which {len2} need analysis:')
 for idx, f in enumerate(files_recursive):
     print(f"{idx+1}: {f}")
