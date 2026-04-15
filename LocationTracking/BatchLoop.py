@@ -121,14 +121,14 @@ def has_Pavlovian_file(filepath):
     return False
 
 
-files_recursive = list(Path(SrcDir).rglob('*.avi'))
+files_recursive: list[Path] = list(Path(SrcDir).rglob('*.avi'))
 
 # Remove some files based on heuristics
 files_recursive = [x for x in files_recursive if "exclude" not in str(x)]
 files_recursive = [x for x in files_recursive if "tracked" not in str(x)]
 
 # Only include files for which there is a .plx file in that folder, for analyzing Paul's files
-files_recursive = [x for x in files_recursive if has_Pavlovian_file(x)]
+# files_recursive = [x for x in files_recursive if has_Pavlovian_file(x)]
 
 len1 = len(files_recursive)
 
@@ -142,12 +142,13 @@ len2 = len(files_recursive)
 files_recursive = sorted(files_recursive)
 print(f'You selected folder "{SrcDir}.\nFolder contains {len1} avi files, of which {len2} need analysis:')
 for idx, f in enumerate(files_recursive):
-    print(f"{idx+1}: {f}")
+    fsize = f.stat().st_size
+    print(f"{idx+1}: {f}  \t({fsize/1000000:.02f} MB)")
 
 # Standard setup to hide the main background window
 root = tk.Tk()
 root.withdraw()
-result = messagebox.askokcancel("", "Please check file list in console, and press OK to continue (note that files already analyzed are excluded from thie list)")
+result = messagebox.askokcancel("", "Please check file list in console, and press OK to continue")
 root.destroy()
 
 if not result:

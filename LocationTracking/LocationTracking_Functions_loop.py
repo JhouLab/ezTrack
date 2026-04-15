@@ -2352,7 +2352,11 @@ def Heatmap (video_dict, location, sigma=None, animal_num=0):
     """    
     heatmap = np.zeros(video_dict['reference'][animal_num].shape)
     for frame in range(len(location)):
-        Y,X = int(location['Y'  + str(animal_num)][frame]), int(location['X' + str(animal_num)][frame])
+        try:
+            Y,X = int(location['Y'  + str(animal_num)][frame]), int(location['X' + str(animal_num)][frame])
+        except:
+            # Missing values might trigger exception. This can happen if mouse is not detected in this frame.
+            continue
         heatmap[Y,X]+=1
     
     sigma = np.mean(heatmap.shape)*.05 if sigma == None else sigma
