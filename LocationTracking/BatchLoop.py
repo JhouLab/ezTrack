@@ -132,15 +132,21 @@ files_recursive = [x for x in files_recursive if "tracked" not in str(x)]
 
 len1 = len(files_recursive)
 
-answer = messagebox.askyesno("", "Exclude files for which prior analysis is detected?")
+answer = messagebox.askyesno("", "Exclude files for which prior analysis is detected (recommend selecting 'YES')?")
 if answer:
     # Remove files
     files_recursive = [x for x in files_recursive if not has_analysis(x)]
 
 len2 = len(files_recursive)
 
+
 files_recursive = sorted(files_recursive)
 print(f'You selected folder "{SrcDir}.\nFolder contains {len1} avi files, of which {len2} need analysis:')
+
+if len2 == 0:
+    print("No files need analyzing, now exiting.")
+    sys.exit()
+
 for idx, f in enumerate(files_recursive):
     fsize = f.stat().st_size
     print(f"{idx+1}: {f}  \t({fsize/1000000:.02f} MB)")
@@ -148,12 +154,12 @@ for idx, f in enumerate(files_recursive):
 # Standard setup to hide the main background window
 root = tk.Tk()
 root.withdraw()
-result = messagebox.askokcancel("", "Please check file list in console, and press OK to continue")
+result = messagebox.askokcancel("", "Please check file list in console, and press OK to accept, or cancel to quit.")
 root.destroy()
 
 if not result:
     print("Cancelled.")
-    sys.exit(1)
+    sys.exit()
 
 
 for progress_count, f in enumerate(files_recursive):
@@ -276,9 +282,10 @@ for progress_count, f in enumerate(files_recursive):
         plt_hmap = lt.Heatmap(video_dict, location, sigma=None)
         p = (plt_trks + plt_hmap + plt_dist).cols(3)
 
-        fpath = lt.GetFileBase(video_dict) + "_" + video_dict['crop_names'][x] + "_movement.png"
-        print(f'Saving to movement summary file: {fpath}')
-        hv.save(p, fpath)
+        fpath_stem = lt.GetFileBase(video_dict) + "_" + video_dict['crop_names'][x] + "_movement"
+        print(f'Saving to movement summary file: {fpath_stem} (.png and .svg)')
+        hv.save(p, fpath_stem + ".png")
+        hv.save(p, fpath_stem + ".svg", backend='matplotlib')
 
     display_dict = {
         'start'      : 0,       # If < video_dict['start'], will be coerced to that value
