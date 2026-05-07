@@ -151,6 +151,8 @@ for idx, f in enumerate(files_recursive):
     fsize = f.stat().st_size
     print(f"{idx+1}: {f}  \t({fsize/1000000:.02f} MB)")
 
+print('\nAccept (or cancel) this list using the dialog box (which might be behind this window).')
+
 # Standard setup to hide the main background window
 root = tk.Tk()
 root.withdraw()
