@@ -34,7 +34,7 @@ elif hostname == "TJ_gram":
 elif hostname == "DESKTOP-DIQ9828":
     RaidFolder = r"\\LABUNRAID\zfs48_share/"
 else:
-    print("Unrecognized machine, please choose top level video folder from dialog.")
+    print("Unrecognized machine, defaulting to \\\\LABUNRAID\\zfs48_share.")
     RaidFolder = r"\\LABUNRAID\zfs48_share/"
 
 
@@ -61,13 +61,18 @@ def find_firefox_windows():
         if path.is_file():
             print(f'Found Firefox installation at: "{path}"')
             return str(path)
-    print('Unable to find firefox installation. Some graph generating code may not work.')
+    print('WARNING: Unable to find firefox installation. This is needed for graph generation.')
     return None
 
 
 # Append firefox.exe to path
 current_path = os.environ.get('PATH')
-firefox_dir = os.path.dirname(find_firefox_windows())  # r"C:\Program Files (x86)\Mozilla Firefox/"   # Use "r" in front to prevent backslashes from being interpreted as escape symbols
+tmp = find_firefox_windows()
+if tmp is None:
+    # Don't proceed without firefox
+    sys.exit(0)
+else:
+    firefox_dir = os.path.dirname(find_firefox_windows())  # r"C:\Program Files (x86)\Mozilla Firefox/"   # Use "r" in front to prevent backslashes from being interpreted as escape symbols
 if not current_path.endswith(os.pathsep):
     # Append semicolon if not already present. Usually it will already be there, so this is skipped
     current_path = current_path + os.pathsep
@@ -84,7 +89,7 @@ root = tk.Tk()
 root.withdraw()
 root.wm_attributes('-topmost', True)
 
-print('\nPlease select folder from dialog box. Note that it might be behind the Python window, or on another screen.')
+print('\nPlease select behavioral videos folder from dialog box. Note that it might be behind the Python window, or on another screen.')
 
 relative_paths = ["behavior_videos", "behavior_videos_copy"]
 
