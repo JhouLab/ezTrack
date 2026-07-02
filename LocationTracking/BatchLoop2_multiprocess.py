@@ -323,9 +323,14 @@ if __name__ == '__main__':
     total_count = len(files_recursive)
     numbers = list(range(total_count))
 
+    start_time = time.time()
+
     # Pool() automatically defaults to your system's max CPU core count
     with Pool(processes=4) as pool:
         # map distributes the array and gathers results back in exact order
         results = pool.starmap(do_one_file, zip(numbers, [total_count] * total_count, files_recursive))
 
     print(f"Parallel calculation results: {results}")
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    print(f"Elapsed time: {elapsed_time:.2f} seconds\n")
